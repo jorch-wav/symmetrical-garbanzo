@@ -759,7 +759,7 @@ export default function App() {
       <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
 
       {/* Top bar */}
-      <div style={{position:"sticky",top:0,zIndex:50,background:"#060606",borderBottom:"1px solid #111",padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{position:"sticky",top:0,zIndex:50,background:"#060606",borderBottom:"1px solid #111",paddingTop:"max(12px, env(safe-area-inset-top))",paddingBottom:"12px",paddingLeft:"16px",paddingRight:"16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style={{fontSize:11,color:"#e8ff6b",letterSpacing:3}}>TRAINING.SYS</div>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
           {/* Week picker */}
@@ -818,7 +818,7 @@ export default function App() {
       </div>
 
       {/* Bottom nav */}
-      <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#060606",borderTop:"1px solid #111",display:"flex",justifyContent:"center",gap:2,padding:"10px 16px 28px"}}>
+      <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#060606",borderTop:"1px solid #111",display:"flex",justifyContent:"center",gap:2,paddingTop:"10px",paddingLeft:"16px",paddingRight:"16px",paddingBottom:"max(28px, calc(env(safe-area-inset-bottom) + 10px))"}}>
         {[["session","SESSION"],["dashboard","PROGRESS"]].map(([v,label])=>(
           <button key={v} onClick={()=>setView(v)} style={{flex:1,maxWidth:180,background:view===v?"#0f0f0f":"transparent",border:`1px solid ${view===v?"#1a1a1a":"transparent"}`,borderRadius:8,color:view===v?"#e8ff6b":"#333",fontFamily:"'JetBrains Mono',monospace",fontSize:11,letterSpacing:2,padding:"10px 0",cursor:"pointer"}}>{label}</button>
         ))}
