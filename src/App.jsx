@@ -1,5 +1,45 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+// ─── INDEXEDDB STORAGE ────────────────────────────────────────────────────────
+
+const DB_NAME = "training_sys";
+const DB_VERSION = 1;
+const STORE = "workout_data";
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => { e.target.result.createObjectStore(STORE); };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGet(key) {
+  try {
+    const db = await openDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).get(key);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+
+async function idbSet(key, value) {
+  try {
+    const db = await openDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    });
+  } catch { return false; }
+}
+
+
 // ─── PROGRAM DATA ─────────────────────────────────────────────────────────────
 
 const PROGRAM = {
@@ -100,16 +140,12 @@ function freshData() {
   return d;
 }
 
-function loadData() {
-  try {
-    const s = localStorage.getItem("wt_v4");
-    if (s) return JSON.parse(s);
-  } catch {}
-  return freshData();
-}
-
+// Async IDB-backed save (fire and forget)
 function saveData(d) {
-  try { localStorage.setItem("wt_v4", JSON.stringify(d)); } catch {}
+  idbSet("wt_v4", d).catch(() => {
+    // fallback to localStorage
+    try { localStorage.setItem("wt_v4", JSON.stringify(d)); } catch {}
+  });
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -639,13 +675,31 @@ function getDayStatus(data, day, week) {
 // ─── APP ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [data, setData]           = useState(()=>loadData());
+  const [data, setData]           = useState(()=>freshData());
+  const [loaded, setLoaded]       = useState(false);
   const [activeDay, setActiveDay] = useState("A");
   const [activeWeek, setActiveWeek] = useState(1);
   const [view, setView]           = useState("session");
   const [weekOpen, setWeekOpen]   = useState(false);
 
-  useEffect(()=>{ saveData(data); },[data]);
+  // Load from IndexedDB on mount (with localStorage fallback)
+  useEffect(() => {
+    idbGet("wt_v4").then(saved => {
+      if (saved) {
+        setData(saved);
+      } else {
+        // Try localStorage migration
+        try {
+          const ls = localStorage.getItem("wt_v4");
+          if (ls) { const parsed = JSON.parse(ls); setData(parsed); }
+        } catch {}
+      }
+      setLoaded(true);
+    });
+  }, []);
+
+  // Save on every data change (after initial load)
+  useEffect(() => { if (loaded) saveData(data); }, [data, loaded]);
 
   const mutate = (fn) => setData(prev=>{ const next=JSON.parse(JSON.stringify(prev)); fn(next); return next; });
 
@@ -676,6 +730,12 @@ export default function App() {
     if(idx>=0) d.bodyWeight[idx].kg=kg;
     else d.bodyWeight.push({date:t,kg});
   });
+
+  if (!loaded) return (
+    <div style={{minHeight:"100vh",background:"#060606",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"#e8ff6b",letterSpacing:4}}>LOADING...</div>
+    </div>
+  );
 
   return (
     <div style={{minHeight:"100vh",background:"#060606",color:"#e0e0e0",fontFamily:"'JetBrains Mono',monospace",paddingBottom:80}}>
