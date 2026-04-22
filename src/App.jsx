@@ -350,7 +350,7 @@ function Sparkline({ values, color="#e8ff6b" }) {
 
 // ─── SESSION VIEW ─────────────────────────────────────────────────────────────
 
-function SessionView({ day, week, data, onUpdateExercise, onUpdateRun, onMarkDone }) {
+function SessionView({ day, week, data, onUpdateExercise, onUpdateRun }) {
   const [numpad, setNumpad]       = useState(null); // {exName} | {type:"km"} 
   const [showTimer, setShowTimer] = useState(false);
 
@@ -358,7 +358,7 @@ function SessionView({ day, week, data, onUpdateExercise, onUpdateRun, onMarkDon
   const session  = data[day]?.[week] || { exercises:{}, runKm:null, done:false };
   const exData   = session.exercises || {};
   const runKm    = session.runKm;
-  const isDone   = session.done;
+  const isDone   = prog.exercises.every(ex=>exData[ex.name]!==null&&exData[ex.name]!==undefined);
   const runInfo  = prog.run.weeks[week-1];
 
   const loggedCount = prog.exercises.filter(e => exData[e.name] !== null && exData[e.name] !== undefined).length;
@@ -382,16 +382,7 @@ function SessionView({ day, week, data, onUpdateExercise, onUpdateRun, onMarkDon
               {loggedCount}<span style={{color:"#2a2a2a"}}>/{total}</span>
             </div>
             {/* Mark done button */}
-            <button onClick={()=>onMarkDone(day,week,!isDone)} style={{
-              background: isDone ? "#1a2e0a" : "#111",
-              border: `1px solid ${isDone?"#3a6a1a":"#222"}`,
-              borderRadius:6, color: isDone?"#6abf40":"#444",
-              fontFamily:"'JetBrains Mono',monospace", fontSize:10,
-              padding:"5px 10px", cursor:"pointer", letterSpacing:1,
-              whiteSpace:"nowrap"
-            }}>
-              {isDone ? "✓ DONE" : "MARK DONE"}
-            </button>
+
           </div>
         </div>
         <div style={{marginTop:10,background:"#141414",borderRadius:3,height:3,overflow:"hidden"}}>
@@ -488,6 +479,39 @@ function SessionView({ day, week, data, onUpdateExercise, onUpdateRun, onMarkDon
   );
 }
 
+// ─── CSV EXPORT ──────────────────────────────────────────────────────────────
+
+function exportCSV(data) {
+  const rows = [["Day","Week","Exercise","Sets","Reps","Weight (kg)"]];
+  for (const day of ["A","B","C"]) {
+    for (let w = 1; w <= 8; w++) {
+      const session = data[day]?.[w];
+      if (!session) continue;
+      for (const ex of PROGRAM[day].exercises) {
+        const val = session.exercises?.[ex.name];
+        if (val !== null && val !== undefined) {
+          rows.push([`Day ${day}`, `Week ${w}`, ex.name, ex.sets, ex.reps, val === 0 ? "BW" : val]);
+        }
+      }
+      if (session.runKm !== null && session.runKm !== undefined) {
+        rows.push([`Day ${day}`, `Week ${w}`, "Run Distance", "", "", `${session.runKm} km`]);
+      }
+    }
+  }
+  // Body weight
+  for (const entry of (data.bodyWeight || [])) {
+    rows.push(["—", "—", "Body Weight", "", "", `${entry.kg} kg (${entry.date})`]);
+  }
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `training_sys_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ─── DASHBOARD VIEW ───────────────────────────────────────────────────────────
 
 function DashboardView({ data, currentWeek, onLogWeight }) {
@@ -508,21 +532,9 @@ function DashboardView({ data, currentWeek, onLogWeight }) {
     vals: Array.from({length:8},(_,i)=>data[day]?.[i+1]?.runKm??null)
   }));
 
-  // Week completion: a day is "done" if marked done OR all exercises + run are logged
   const weekStatus = Array.from({length:8},(_,i)=>{
     const w=i+1;
-    return ["A","B","C"].map(d=>{
-      const s=data[d]?.[w];
-      if (!s) return "empty";
-      if (s.done) return "done";
-      const exArr = PROGRAM[d].exercises;
-      const allEx = exArr.every(ex=>s.exercises?.[ex.name]!==null&&s.exercises?.[ex.name]!==undefined);
-      const hasRun = s.runKm!==null&&s.runKm!==undefined;
-      if (allEx&&hasRun) return "done";
-      const anyEx = exArr.some(ex=>s.exercises?.[ex.name]!==null&&s.exercises?.[ex.name]!==undefined);
-      if (anyEx||hasRun) return "partial";
-      return "empty";
-    });
+    return ["A","B","C"].map(d=>getDayStatus(data,d,w));
   });
 
   const dayLabels=["A","B","C"];
@@ -644,6 +656,18 @@ function DashboardView({ data, currentWeek, onLogWeight }) {
         })}
       </div>
 
+      {/* CSV Export */}
+      <div style={{marginTop:24,paddingTop:20,borderTop:"1px solid #111"}}>
+        <button onClick={()=>exportCSV(data)} style={{
+          width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",
+          borderRadius:8,color:"#666",fontFamily:"'JetBrains Mono',monospace",
+          fontSize:11,letterSpacing:2,padding:"14px 0",cursor:"pointer",
+          display:"flex",alignItems:"center",justifyContent:"center",gap:8
+        }}>
+          <span style={{color:"#444"}}>↓</span> EXPORT DATA AS CSV
+        </button>
+      </div>
+
       {showWeightPad&&(
         <Numpad
           value={latestBW?.kg}
@@ -662,12 +686,10 @@ function DashboardView({ data, currentWeek, onLogWeight }) {
 function getDayStatus(data, day, week) {
   const s = data[day]?.[week];
   if (!s) return "empty";
-  if (s.done) return "done";
   const exArr = PROGRAM[day].exercises;
   const allLogged = exArr.every(ex=>s.exercises?.[ex.name]!==null&&s.exercises?.[ex.name]!==undefined);
-  const hasRun = s.runKm!==null&&s.runKm!==undefined;
-  if (allLogged&&hasRun) return "done";
-  const anyLogged = exArr.some(ex=>s.exercises?.[ex.name]!==null&&s.exercises?.[ex.name]!==undefined)||hasRun;
+  if (allLogged) return "done";
+  const anyLogged = exArr.some(ex=>s.exercises?.[ex.name]!==null&&s.exercises?.[ex.name]!==undefined)||s.runKm!==null;
   if (anyLogged) return "partial";
   return "empty";
 }
@@ -716,11 +738,6 @@ export default function App() {
     d[day][week].runKm=km;
   });
 
-  const handleMarkDone = (day,week,val) => mutate(d=>{
-    if(!d[day]) d[day]={};
-    if(!d[day][week]) d[day][week]={exercises:{},runKm:null,done:false};
-    d[day][week].done=val;
-  });
 
   const handleLogWeight = (kg) => mutate(d=>{
     if(!d.bodyWeight) d.bodyWeight=[];
@@ -792,7 +809,6 @@ export default function App() {
               day={activeDay} week={activeWeek} data={data}
               onUpdateExercise={handleUpdateExercise}
               onUpdateRun={handleUpdateRun}
-              onMarkDone={handleMarkDone}
             />
           :<DashboardView
               data={data} currentWeek={activeWeek}
