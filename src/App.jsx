@@ -512,159 +512,373 @@ function exportCSV(data) {
   URL.revokeObjectURL(url);
 }
 
+// ─── CHART PRIMITIVES ────────────────────────────────────────────────────────
+
+// Full-width bar chart — values array, each {label, value, color?}
+function BarChart({ bars, unit="", height=120, color="#e8ff6b" }) {
+  const maxVal = Math.max(...bars.map(b=>b.value||0), 0.01);
+  return (
+    <div style={{width:"100%"}}>
+      <div style={{display:"flex",alignItems:"flex-end",gap:4,height}}>
+        {bars.map((b,i)=>{
+          const pct = b.value!=null ? (b.value/maxVal) : 0;
+          const barColor = b.color || color;
+          const isEmpty = b.value==null || b.value===0;
+          return (
+            <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%",gap:4}}>
+              {!isEmpty&&b.value!=null&&(
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:barColor,letterSpacing:0,whiteSpace:"nowrap"}}>
+                  {b.value}{unit}
+                </div>
+              )}
+              <div style={{
+                width:"100%",borderRadius:"3px 3px 0 0",
+                height: isEmpty ? 2 : `${Math.max(2,pct*100)}%`,
+                background: isEmpty?"#1a1a1a":barColor,
+                transition:"height 0.4s ease",
+                opacity: isEmpty?0.3:1
+              }}/>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{display:"flex",gap:4,marginTop:6}}>
+        {bars.map((b,i)=>(
+          <div key={i} style={{flex:1,textAlign:"center",fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333",overflow:"hidden"}}>{b.label}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Line chart with axes — values: array of {x, y} or null slots
+function LineChart({ points, width="100%", height=140, color="#e8ff6b", unit="", yMin=null, yMax=null }) {
+  const valid = points.filter(p=>p!=null&&p.y!=null);
+  if (valid.length < 2) return (
+    <div style={{height,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#2a2a2a"}}>not enough data yet</span>
+    </div>
+  );
+  const W=300,H=height;
+  const pad={top:12,right:8,bottom:24,left:32};
+  const innerW=W-pad.left-pad.right;
+  const innerH=H-pad.top-pad.bottom;
+  const minY = yMin!=null?yMin:Math.min(...valid.map(p=>p.y));
+  const maxY = yMax!=null?yMax:Math.max(...valid.map(p=>p.y));
+  const rangeY = maxY-minY||1;
+  const minX = Math.min(...valid.map(p=>p.x));
+  const maxX = Math.max(...valid.map(p=>p.x));
+  const rangeX = maxX-minX||1;
+  const toSvg = (p) => ({
+    x: pad.left + ((p.x-minX)/rangeX)*innerW,
+    y: pad.top + (1-(p.y-minY)/rangeY)*innerH
+  });
+  const svgPts = valid.map(toSvg);
+  const pathD = svgPts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  // Y axis ticks
+  const yTicks = [minY, (minY+maxY)/2, maxY].map(v=>({
+    val: v,
+    y: pad.top + (1-(v-minY)/rangeY)*innerH
+  }));
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:"visible",display:"block"}}>
+      {/* Grid lines */}
+      {yTicks.map((t,i)=>(
+        <g key={i}>
+          <line x1={pad.left} y1={t.y} x2={W-pad.right} y2={t.y} stroke="#1a1a1a" strokeWidth={1}/>
+          <text x={pad.left-4} y={t.y+3} fill="#333" fontSize={8} textAnchor="end" fontFamily="monospace">{Number.isInteger(t.val)?t.val:t.val.toFixed(1)}</text>
+        </g>
+      ))}
+      {/* Line */}
+      <path d={pathD} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>
+      {/* Dots */}
+      {svgPts.map((p,i)=>(
+        <circle key={i} cx={p.x} cy={p.y} r={3} fill={color}/>
+      ))}
+      {/* Last value label */}
+      {svgPts.length>0&&(
+        <text x={svgPts[svgPts.length-1].x+5} y={svgPts[svgPts.length-1].y+4} fill={color} fontSize={9} fontFamily="monospace">{valid[valid.length-1].y}{unit}</text>
+      )}
+      {/* X axis labels */}
+      {svgPts.map((p,i)=>(
+        <text key={i} x={p.x} y={H} fill="#333" fontSize={8} textAnchor="middle" fontFamily="monospace">{valid[i].label||valid[i].x}</text>
+      ))}
+    </svg>
+  );
+}
+
 // ─── DASHBOARD VIEW ───────────────────────────────────────────────────────────
 
 function DashboardView({ data, currentWeek, onLogWeight }) {
   const [selectedEx, setSelectedEx] = useState("Dumbbell Bench Press");
-  const [showWeightPad, setShowWeightPad]   = useState(false);
+  const [showWeightPad, setShowWeightPad] = useState(false);
+  const [activeSection, setActiveSection] = useState("consistency"); // consistency | lifts | runs | weight
+
   const allEx = [...new Set(["A","B","C"].flatMap(d=>PROGRAM[d].exercises.map(e=>e.name)))];
-
   const bwEntries = data.bodyWeight || [];
-  const latestBW  = bwEntries.length>0 ? bwEntries[bwEntries.length-1] : null;
+  const latestBW = bwEntries.length>0 ? bwEntries[bwEntries.length-1] : null;
 
-  const series = ["A","B","C"].map(day=>{
-    if (!PROGRAM[day].exercises.find(e=>e.name===selectedEx)) return null;
-    return { day, vals: Array.from({length:8},(_,i)=>data[day]?.[i+1]?.exercises?.[selectedEx]??null) };
-  }).filter(Boolean);
-
-  const runSeries = ["A","B","C"].map(day=>({
-    day,
-    vals: Array.from({length:8},(_,i)=>data[day]?.[i+1]?.runKm??null)
+  // ── Consistency data ──
+  const weekStatus = Array.from({length:8},(_,i)=>({
+    week: i+1,
+    days: ["A","B","C"].map(d=>getDayStatus(data,d,i+1))
   }));
+  const totalDone = weekStatus.flatMap(w=>w.days).filter(s=>s==="done").length;
+  const totalSessions = currentWeek * 3; // sessions that should have happened
+  const streak = (() => {
+    let s=0;
+    for (let w=currentWeek;w>=1;w--) {
+      for (let di=2;di>=0;di--) {
+        if (weekStatus[w-1].days[di]==="done") s++;
+        else return s;
+      }
+    }
+    return s;
+  })();
 
-  const weekStatus = Array.from({length:8},(_,i)=>{
+  // ── Lift data for selected exercise ──
+  const liftBars = Array.from({length:8},(_,i)=>{
     const w=i+1;
-    return ["A","B","C"].map(d=>getDayStatus(data,d,w));
+    // average across days that have this exercise
+    const vals=["A","B","C"].map(d=>{
+      if(!PROGRAM[d].exercises.find(e=>e.name===selectedEx)) return null;
+      return data[d]?.[w]?.exercises?.[selectedEx]??null;
+    }).filter(v=>v!==null);
+    const avg = vals.length>0 ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+    return { label:`W${w}`, value: avg!==null?+avg.toFixed(1):null, color: w===currentWeek?"#e8ff6b":"#3a5a2a" };
   });
 
-  const dayLabels=["A","B","C"];
+  // Per-day line charts for selected exercise
+  const liftLines = ["A","B","C"].map(day=>{
+    if(!PROGRAM[day].exercises.find(e=>e.name===selectedEx)) return null;
+    const pts = Array.from({length:8},(_,i)=>{
+      const v=data[day]?.[i+1]?.exercises?.[selectedEx]??null;
+      return v!==null?{x:i+1,y:v,label:`W${i+1}`}:null;
+    }).filter(Boolean);
+    return {day,pts};
+  }).filter(Boolean);
+
+  // ── Run data ──
+  const runBars = Array.from({length:8},(_,i)=>{
+    const w=i+1;
+    const vals=["A","B","C"].map(d=>data[d]?.[w]?.runKm??null).filter(v=>v!==null);
+    const total=vals.length>0?+vals.reduce((a,b)=>a+b,0).toFixed(2):null;
+    return {label:`W${w}`,value:total,color:w===currentWeek?"#6bb8ff":"#1a3a5a"};
+  });
+  const allRunKm = ["A","B","C"].flatMap(d=>Array.from({length:8},(_,i)=>data[d]?.[i+1]?.runKm??null)).filter(v=>v!==null);
+  const totalKm = allRunKm.reduce((a,b)=>a+b,0).toFixed(1);
+
+  const SECTIONS = ["consistency","lifts","runs","weight"];
+  const SECTION_LABELS = ["STREAK","LIFTS","RUNS","WEIGHT"];
 
   return (
     <div>
-      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:20}}>PROGRESS DASHBOARD</div>
+      {/* Section tabs */}
+      <div style={{display:"flex",gap:4,marginBottom:24,borderBottom:"1px solid #111",paddingBottom:0}}>
+        {SECTIONS.map((s,i)=>(
+          <button key={s} onClick={()=>setActiveSection(s)} style={{
+            flex:1,background:"none",border:"none",
+            borderBottom:`2px solid ${activeSection===s?"#e8ff6b":"transparent"}`,
+            color:activeSection===s?"#e8ff6b":"#333",
+            fontFamily:"'JetBrains Mono',monospace",fontSize:8,letterSpacing:1,
+            padding:"0 0 10px",cursor:"pointer",transition:"all 0.2s"
+          }}>{SECTION_LABELS[i]}</button>
+        ))}
+      </div>
 
-      {/* Body weight */}
-      <div style={{marginBottom:24,background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3}}>BODY WEIGHT</div>
-          <button onClick={()=>setShowWeightPad(true)} style={{background:"#111",border:"1px solid #222",borderRadius:6,color:"#888",fontFamily:"'JetBrains Mono',monospace",fontSize:10,padding:"5px 10px",cursor:"pointer",letterSpacing:1}}>+ LOG</button>
-        </div>
-        <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:16}}>
-          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:36,fontWeight:700,color:latestBW?"#e8ff6b":"#222"}}>
-            {latestBW?latestBW.kg:"—"}
-          </div>
-          {latestBW&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,color:"#555"}}>kg</div>}
-          {latestBW&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#333",marginLeft:4}}>{latestBW.date}</div>}
-        </div>
-        {bwEntries.length>=2&&(
-          <div>
-            <Sparkline values={bwEntries.map(e=>e.kg)} color="#e8ff6b"/>
-            <div style={{display:"flex",justifyContent:"space-between",marginTop:6}}>
-              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#333"}}>{bwEntries[0].date}</span>
-              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:bwEntries[bwEntries.length-1].kg<bwEntries[0].kg?"#6abf40":bwEntries[bwEntries.length-1].kg>bwEntries[0].kg?"#ff6b6b":"#333"}}>
-                {(bwEntries[bwEntries.length-1].kg-bwEntries[0].kg).toFixed(1)} kg
-              </span>
-            </div>
-          </div>
-        )}
-        {bwEntries.length>0&&(
-          <div style={{marginTop:12,maxHeight:100,overflowY:"auto"}}>
-            {[...bwEntries].reverse().map((e,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #111"}}>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#444"}}>{e.date}</span>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"#888"}}>{e.kg} kg</span>
+      {/* ── CONSISTENCY ── */}
+      {activeSection==="consistency"&&(
+        <div>
+          {/* Summary stats */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:24}}>
+            {[
+              ["SESSIONS",`${totalDone}`,"done"],
+              ["STREAK",`${streak}`,"days"],
+              ["WEEK",`${currentWeek}/8`,""]
+            ].map(([label,val,sub])=>(
+              <div key={label} style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:"14px 10px",textAlign:"center"}}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#444",letterSpacing:2,marginBottom:6}}>{label}</div>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:28,fontWeight:700,color:"#e8ff6b",lineHeight:1}}>{val}</div>
+                {sub&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#444",marginTop:4}}>{sub}</div>}
               </div>
             ))}
           </div>
-        )}
-      </div>
 
-      {/* Program timeline */}
-      <div style={{marginBottom:24}}>
-        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",marginBottom:10}}>PROGRAM TIMELINE</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:4}}>
-          {weekStatus.map((days,wi)=>(
-            <div key={wi}>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:wi+1===currentWeek?"#e8ff6b":"#2a2a2a",textAlign:"center",marginBottom:3}}>{wi+1}</div>
-              {days.map((status,di)=>{
-                const color = status==="done"?"#6abf40":status==="partial"?"#e8a82a":"#1a1a1a";
-                const border = wi+1===currentWeek?"#e8ff6b33":"#111";
-                return <div key={di} style={{height:8,borderRadius:2,background:color,border:`1px solid ${border}`,marginBottom:2}}/>;
-              })}
-              <div style={{display:"flex",flexDirection:"column",gap:1,marginTop:2}}>
-                {dayLabels.map((l,di)=>(
-                  <div key={di} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:6,color:"#222",textAlign:"center"}}>{l}</div>
-                ))}
-              </div>
+          {/* Heatmap grid */}
+          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:24}}>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:16}}>8-WEEK HEATMAP</div>
+            <div style={{display:"grid",gridTemplateColumns:"20px repeat(8,1fr)",gap:5,alignItems:"center"}}>
+              {/* Row labels */}
+              <div/>
+              {Array.from({length:8},(_,i)=>(
+                <div key={i} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:i+1===currentWeek?"#e8ff6b":"#2a2a2a",textAlign:"center"}}>W{i+1}</div>
+              ))}
+              {["A","B","C"].map((day,di)=>(
+                <>
+                  <div key={`l${di}`} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333"}}>D{day}</div>
+                  {Array.from({length:8},(_,wi)=>{
+                    const status=weekStatus[wi].days[di];
+                    const bg=status==="done"?"#6abf40":status==="partial"?"#e8a82a":"#141414";
+                    const isCurrent=wi+1===currentWeek;
+                    return (
+                      <div key={wi} style={{
+                        height:22,borderRadius:4,background:bg,
+                        border:`1px solid ${isCurrent?"#e8ff6b44":status==="done"?"#3a6a2a":status==="partial"?"#5a4a1a":"#1e1e1e"}`,
+                        display:"flex",alignItems:"center",justifyContent:"center"
+                      }}>
+                        {status==="done"&&<span style={{fontSize:8,color:"#1a3a1a"}}>✓</span>}
+                      </div>
+                    );
+                  })}
+                </>
+              ))}
             </div>
-          ))}
-        </div>
-        <div style={{display:"flex",gap:12,marginTop:10}}>
-          {[["#6abf40","Done"],["#e8a82a","Partial"],["#1a1a1a","Not started"]].map(([c,l])=>(
-            <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
-              <div style={{width:8,height:8,borderRadius:2,background:c}}/>
-              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#333"}}>{l}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Lift progression */}
-      <div style={{marginBottom:24,background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16}}>
-        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",marginBottom:12}}>LIFT PROGRESSION</div>
-        <select value={selectedEx} onChange={e=>setSelectedEx(e.target.value)} style={{width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",color:"#e0e0e0",fontFamily:"'JetBrains Mono',monospace",fontSize:12,padding:"8px 10px",borderRadius:6,marginBottom:16,outline:"none"}}>
-          {allEx.map(e=><option key={e} value={e}>{e}</option>)}
-        </select>
-        {series.map(({day,vals})=>{
-          const f=vals.filter(v=>v!==null);
-          const latest=f[f.length-1];
-          const delta=f.length>=2?+(latest-f[0]).toFixed(1):null;
-          const color=day==="A"?"#e8ff6b":day==="B"?"#6abf40":"#6bb8ff";
-          return (
-            <div key={day} style={{marginBottom:14}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#444"}}>Day {day}</span>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  {delta!==null&&<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:delta>0?"#6abf40":delta<0?"#ff6b6b":"#444"}}>{delta>0?"+":""}{delta}kg</span>}
-                  <Sparkline values={vals} color={color}/>
-                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,color:"#e0e0e0",minWidth:44,textAlign:"right"}}>{latest!==undefined&&latest!==null?fmt(latest):"—"}</span>
+            <div style={{display:"flex",gap:14,marginTop:14}}>
+              {[["#6abf40","Complete"],["#e8a82a","Partial"],["#141414","Pending"]].map(([c,l])=>(
+                <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:8,height:8,borderRadius:2,background:c}}/>
+                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333"}}>{l}</span>
                 </div>
-              </div>
+              ))}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        </div>
+      )}
 
-      {/* Run distances */}
-      <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16}}>
-        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",marginBottom:14}}>RUN DISTANCES</div>
-        {runSeries.map(({day,vals})=>{
-          const f=vals.filter(v=>v!==null);
-          const latest=f[f.length-1];
-          const color=day==="A"?"#e8ff6b":day==="B"?"#6abf40":"#6bb8ff";
-          return (
-            <div key={day} style={{marginBottom:14}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#444"}}>Day {day}</span>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <Sparkline values={vals} color={color}/>
-                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,color:"#e0e0e0",minWidth:52,textAlign:"right"}}>{latest!==undefined&&latest!==null?`${latest}km`:"—"}</span>
+      {/* ── LIFTS ── */}
+      {activeSection==="lifts"&&(
+        <div>
+          <select value={selectedEx} onChange={e=>setSelectedEx(e.target.value)} style={{width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",color:"#e0e0e0",fontFamily:"'JetBrains Mono',monospace",fontSize:12,padding:"10px 12px",borderRadius:8,marginBottom:20,outline:"none"}}>
+            {allEx.map(e=><option key={e} value={e}>{e}</option>)}
+          </select>
+
+          {/* Average weight per week bar chart */}
+          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16}}>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:16}}>AVG WEIGHT PER WEEK</div>
+            <BarChart bars={liftBars} unit="kg" height={110}/>
+          </div>
+
+          {/* Per-day line charts */}
+          {liftLines.map(({day,pts})=>{
+            const color=day==="A"?"#e8ff6b":day==="B"?"#6abf40":"#6bb8ff";
+            const f=pts.map(p=>p.y);
+            const delta=f.length>=2?+(f[f.length-1]-f[0]).toFixed(1):null;
+            return (
+              <div key={day} style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3}}>DAY {day}</div>
+                  {delta!==null&&(
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:delta>0?"#6abf40":delta<0?"#ff6b6b":"#444"}}>
+                      {delta>0?"+":""}{delta} kg
+                    </div>
+                  )}
                 </div>
+                <LineChart points={pts} color={color} height={100} unit="kg"/>
               </div>
+            );
+          })}
+          {liftLines.every(l=>l.pts.length<2)&&(
+            <div style={{textAlign:"center",padding:"32px 0",fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#2a2a2a"}}>
+              log more sessions to see trends
             </div>
-          );
-        })}
-      </div>
+          )}
+        </div>
+      )}
 
-      {/* CSV Export */}
-      <div style={{marginTop:24,paddingTop:20,borderTop:"1px solid #111"}}>
+      {/* ── RUNS ── */}
+      {activeSection==="runs"&&(
+        <div>
+          {/* Total km stat */}
+          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16,display:"flex",alignItems:"baseline",gap:8}}>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:42,fontWeight:700,color:"#6bb8ff"}}>{totalKm}</div>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,color:"#444"}}>km total</div>
+          </div>
+
+          {/* Weekly km bar chart */}
+          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16}}>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:16}}>KM PER WEEK</div>
+            <BarChart bars={runBars} unit="km" height={110} color="#6bb8ff"/>
+          </div>
+
+          {/* Per-day run line charts */}
+          {["A","B","C"].map(day=>{
+            const color=day==="A"?"#e8ff6b":day==="B"?"#6abf40":"#6bb8ff";
+            const pts=Array.from({length:8},(_,i)=>{
+              const v=data[day]?.[i+1]?.runKm??null;
+              return v!==null?{x:i+1,y:v,label:`W${i+1}`}:null;
+            }).filter(Boolean);
+            const runLabel=PROGRAM[day].run.type==="intervals"?"INTERVALS":day==="C"?"LONG EASY":"EASY";
+            return (
+              <div key={day} style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:12}}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:12}}>
+                  DAY {day} — {runLabel}
+                </div>
+                <LineChart points={pts} color={color} height={90} unit="km"/>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── WEIGHT ── */}
+      {activeSection==="weight"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+            <div>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:6}}>CURRENT</div>
+              <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:48,fontWeight:700,color:latestBW?"#e8ff6b":"#222",lineHeight:1}}>
+                  {latestBW?latestBW.kg:"—"}
+                </div>
+                {latestBW&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,color:"#555"}}>kg</div>}
+              </div>
+              {bwEntries.length>=2&&(
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,marginTop:4,
+                  color:bwEntries[bwEntries.length-1].kg<bwEntries[0].kg?"#6abf40":bwEntries[bwEntries.length-1].kg>bwEntries[0].kg?"#ff6b6b":"#444"
+                }}>
+                  {(bwEntries[bwEntries.length-1].kg-bwEntries[0].kg)>0?"+":""}{(bwEntries[bwEntries.length-1].kg-bwEntries[0].kg).toFixed(1)} kg since start
+                </div>
+              )}
+            </div>
+            <button onClick={()=>setShowWeightPad(true)} style={{background:"#e8ff6b",border:"none",borderRadius:8,color:"#060606",fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,padding:"10px 16px",cursor:"pointer",letterSpacing:1}}>+ LOG</button>
+          </div>
+
+          {/* Line chart */}
+          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16}}>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:12}}>WEIGHT OVER TIME</div>
+            <LineChart
+              points={bwEntries.map((e,i)=>({x:i,y:e.kg,label:e.date.slice(5)}))}
+              color="#e8ff6b" height={130} unit="kg"
+              yMin={bwEntries.length>0?Math.min(...bwEntries.map(e=>e.kg))-1:null}
+              yMax={bwEntries.length>0?Math.max(...bwEntries.map(e=>e.kg))+1:null}
+            />
+          </div>
+
+          {/* Log history */}
+          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16}}>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:12}}>HISTORY</div>
+            {bwEntries.length===0&&(
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#2a2a2a",textAlign:"center",padding:"20px 0"}}>no entries yet</div>
+            )}
+            {[...bwEntries].reverse().map((e,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #111"}}>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#444"}}>{e.date}</span>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,color:"#e0e0e0"}}>{e.kg} kg</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* CSV Export — always visible at bottom */}
+      <div style={{marginTop:32,paddingTop:20,borderTop:"1px solid #111"}}>
         <button onClick={()=>exportCSV(data)} style={{
           width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",
-          borderRadius:8,color:"#666",fontFamily:"'JetBrains Mono',monospace",
-          fontSize:11,letterSpacing:2,padding:"14px 0",cursor:"pointer",
+          borderRadius:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",
+          fontSize:10,letterSpacing:2,padding:"14px 0",cursor:"pointer",
           display:"flex",alignItems:"center",justifyContent:"center",gap:8
         }}>
-          <span style={{color:"#444"}}>↓</span> EXPORT DATA AS CSV
+          <span style={{color:"#333"}}>↓</span> EXPORT DATA AS CSV
         </button>
       </div>
 
