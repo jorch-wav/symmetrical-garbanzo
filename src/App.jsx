@@ -636,284 +636,309 @@ function LineChart({ points, width="100%", height=140, color="#e8ff6b", unit="",
 
 // ─── DASHBOARD VIEW ───────────────────────────────────────────────────────────
 
+function ChartToggle({ mode, onChange }) {
+  return (
+    <div style={{display:"flex",gap:3}}>
+      {[["bar","▬"],["line","╱"],["dot","•"]].map(([m,icon])=>(
+        <button key={m} onClick={()=>onChange(m)} style={{
+          background:mode===m?"#e8ff6b":"#111",
+          border:`1px solid ${mode===m?"#e8ff6b":"#1e1e1e"}`,
+          borderRadius:4,color:mode===m?"#060606":"#444",
+          fontFamily:"'JetBrains Mono',monospace",fontSize:11,
+          padding:"3px 8px",cursor:"pointer",lineHeight:1
+        }}>{icon}</button>
+      ))}
+    </div>
+  );
+}
+
+function Chart({ points, mode, color, unit="", height=120 }) {
+  // points: [{x, y, label}] — nulls already filtered out by caller
+  const valid = points.filter(p=>p&&p.y!=null);
+
+  if (valid.length === 0) return (
+    <div style={{height:40,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#222"}}>no data yet</span>
+    </div>
+  );
+
+  const maxY = Math.max(...valid.map(p=>p.y));
+  const minY = Math.min(...valid.map(p=>p.y));
+  const rangeY = maxY - minY || 1;
+
+  // ── BAR ──
+  if (mode === "bar") {
+    return (
+      <div style={{width:"100%"}}>
+        <div style={{display:"flex",alignItems:"flex-end",gap:4,height}}>
+          {points.map((p,i)=>{
+            const empty = !p || p.y==null;
+            const pct = empty ? 0 : p.y / maxY;
+            return (
+              <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%",gap:3}}>
+                {!empty&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color,whiteSpace:"nowrap"}}>{p.y}{unit}</div>}
+                <div style={{
+                  width:"100%",borderRadius:"3px 3px 0 0",
+                  height:empty?2:`${Math.max(3,pct*100)}%`,
+                  background:empty?"#141414":color,opacity:empty?0.3:1,
+                  transition:"height 0.4s ease"
+                }}/>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{display:"flex",gap:4,marginTop:5}}>
+          {points.map((p,i)=>(
+            <div key={i} style={{flex:1,textAlign:"center",fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#2a2a2a"}}>{p?.label||`W${i+1}`}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── LINE & DOT — SVG ──
+  const W=300, H=height, pad={top:14,right:24,bottom:20,left:28};
+  const iW=W-pad.left-pad.right, iH=H-pad.top-pad.bottom;
+  const toX=(i)=>pad.left+(i/(points.length-1||1))*iW;
+  const toY=(v)=>pad.top+(1-(v-minY)/rangeY)*iH;
+
+  const svgValid = valid.map(p=>({...p, sx:toX(points.indexOf(p)), sy:toY(p.y)}));
+  const pathD = svgValid.map((p,i)=>`${i===0?"M":"L"}${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(" ");
+
+  // y-axis ticks
+  const ticks = minY===maxY ? [minY] : [minY, maxY];
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:"visible",display:"block"}}>
+      {ticks.map((t,i)=>(
+        <g key={i}>
+          <line x1={pad.left} y1={toY(t)} x2={W-pad.right} y2={toY(t)} stroke="#1a1a1a" strokeWidth={1}/>
+          <text x={pad.left-4} y={toY(t)+4} fill="#333" fontSize={8} textAnchor="end" fontFamily="monospace">
+            {Number.isInteger(t)?t:t.toFixed(1)}
+          </text>
+        </g>
+      ))}
+      {mode==="line"&&<path d={pathD} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>}
+      {svgValid.map((p,i)=>(
+        <g key={i}>
+          <circle cx={p.sx} cy={p.sy} r={mode==="dot"?4:3} fill={color}/>
+          {(i===svgValid.length-1||mode==="dot")&&(
+            <text x={p.sx} y={p.sy-7} fill={color} fontSize={8} textAnchor="middle" fontFamily="monospace">{p.y}{unit}</text>
+          )}
+        </g>
+      ))}
+      {points.map((p,i)=>(
+        <text key={i} x={toX(i)} y={H} fill="#2a2a2a" fontSize={8} textAnchor="middle" fontFamily="monospace">{p?.label||`W${i+1}`}</text>
+      ))}
+    </svg>
+  );
+}
+
 function DashboardView({ data, currentWeek, onLogWeight }) {
-  const [selectedEx, setSelectedEx] = useState("Dumbbell Bench Press");
   const [showWeightPad, setShowWeightPad] = useState(false);
-  const [activeSection, setActiveSection] = useState("consistency"); // consistency | lifts | runs | weight
+  const [selectedEx, setSelectedEx]       = useState("Dumbbell Bench Press");
+  const [liftMode, setLiftMode]           = useState("bar");
+  const [runMode, setRunMode]             = useState("bar");
+  const [bwMode, setBwMode]               = useState("line");
 
   const allEx = [...new Set(["A","B","C"].flatMap(d=>PROGRAM[d].exercises.map(e=>e.name)))];
   const bwEntries = data.bodyWeight || [];
-  const latestBW = bwEntries.length>0 ? bwEntries[bwEntries.length-1] : null;
+  const latestBW  = bwEntries.length>0 ? bwEntries[bwEntries.length-1] : null;
 
-  // ── Consistency data ──
+  // Heatmap
   const weekStatus = Array.from({length:8},(_,i)=>({
-    week: i+1,
-    days: ["A","B","C"].map(d=>getDayStatus(data,d,i+1))
+    week:i+1,
+    days:["A","B","C"].map(d=>getDayStatus(data,d,i+1))
   }));
-  const totalDone = weekStatus.flatMap(w=>w.days).filter(s=>s==="done").length;
-  const totalSessions = currentWeek * 3; // sessions that should have happened
-  const streak = (() => {
-    let s=0;
-    for (let w=currentWeek;w>=1;w--) {
-      for (let di=2;di>=0;di--) {
-        if (weekStatus[w-1].days[di]==="done") s++;
-        else return s;
-      }
-    }
-    return s;
-  })();
 
-  // ── Lift data for selected exercise ──
-  const liftBars = Array.from({length:8},(_,i)=>{
+  // Lift data — average across days per week for selected exercise
+  const liftPoints = Array.from({length:8},(_,i)=>{
     const w=i+1;
-    // average across days that have this exercise
     const vals=["A","B","C"].map(d=>{
       if(!PROGRAM[d].exercises.find(e=>e.name===selectedEx)) return null;
       return data[d]?.[w]?.exercises?.[selectedEx]??null;
     }).filter(v=>v!==null);
-    const avg = vals.length>0 ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
-    return { label:`W${w}`, value: avg!==null?+avg.toFixed(1):null, color: w===currentWeek?"#e8ff6b":"#3a5a2a" };
+    if(vals.length===0) return null;
+    return {x:i,y:+( vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1),label:`W${w}`};
   });
 
-  // Per-day line charts for selected exercise
-  const liftLines = ["A","B","C"].map(day=>{
+  // Per-day lift points
+  const liftByDay = ["A","B","C"].map(day=>{
     if(!PROGRAM[day].exercises.find(e=>e.name===selectedEx)) return null;
-    const pts = Array.from({length:8},(_,i)=>{
-      const v=data[day]?.[i+1]?.exercises?.[selectedEx]??null;
-      return v!==null?{x:i+1,y:v,label:`W${i+1}`}:null;
-    }).filter(Boolean);
-    return {day,pts};
+    return {
+      day,
+      color:day==="A"?"#e8ff6b":day==="B"?"#6abf40":"#6bb8ff",
+      points:Array.from({length:8},(_,i)=>{
+        const v=data[day]?.[i+1]?.exercises?.[selectedEx]??null;
+        return v!==null?{x:i,y:v,label:`W${i+1}`}:null;
+      })
+    };
   }).filter(Boolean);
 
-  // ── Run data ──
-  const runBars = Array.from({length:8},(_,i)=>{
+  // Run data — total km per week
+  const runPoints = Array.from({length:8},(_,i)=>{
     const w=i+1;
     const vals=["A","B","C"].map(d=>data[d]?.[w]?.runKm??null).filter(v=>v!==null);
-    const total=vals.length>0?+vals.reduce((a,b)=>a+b,0).toFixed(2):null;
-    return {label:`W${w}`,value:total,color:w===currentWeek?"#6bb8ff":"#1a3a5a"};
+    if(vals.length===0) return null;
+    return {x:i,y:+vals.reduce((a,b)=>a+b,0).toFixed(2),label:`W${w}`};
   });
-  const allRunKm = ["A","B","C"].flatMap(d=>Array.from({length:8},(_,i)=>data[d]?.[i+1]?.runKm??null)).filter(v=>v!==null);
-  const totalKm = allRunKm.reduce((a,b)=>a+b,0).toFixed(1);
 
-  const SECTIONS = ["consistency","lifts","runs","weight"];
-  const SECTION_LABELS = ["STREAK","LIFTS","RUNS","WEIGHT"];
+  // Run per day
+  const runByDay=[{day:"A",label:"EASY",color:"#e8ff6b"},{day:"B",label:"INTERVALS",color:"#6abf40"},{day:"C",label:"LONG EASY",color:"#6bb8ff"}].map(({day,label,color})=>({
+    day,label,color,
+    points:Array.from({length:8},(_,i)=>{
+      const v=data[day]?.[i+1]?.runKm??null;
+      return v!==null?{x:i,y:v,label:`W${i+1}`}:null;
+    })
+  }));
+
+  // BW points
+  const bwPoints = bwEntries.map((e,i)=>({x:i,y:e.kg,label:e.date.slice(5)}));
+  const bwDelta  = bwEntries.length>=2 ? +(bwEntries[bwEntries.length-1].kg-bwEntries[0].kg).toFixed(1) : null;
+  const totalKm  = ["A","B","C"].flatMap(d=>Array.from({length:8},(_,i)=>data[d]?.[i+1]?.runKm??null)).filter(v=>v!==null).reduce((a,b)=>a+b,0).toFixed(1);
+
+  const S = (label,val,sub,color="#e8ff6b") => (
+    <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:"12px 10px",textAlign:"center"}}>
+      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#444",letterSpacing:2,marginBottom:5}}>{label}</div>
+      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:24,fontWeight:700,color,lineHeight:1}}>{val}</div>
+      {sub&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#444",marginTop:4}}>{sub}</div>}
+    </div>
+  );
+
+  const Card = ({title,right,children}) => (
+    <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3}}>{title}</div>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
 
   return (
     <div>
-      {/* Section tabs */}
-      <div style={{display:"flex",gap:4,marginBottom:24,borderBottom:"1px solid #111",paddingBottom:0}}>
-        {SECTIONS.map((s,i)=>(
-          <button key={s} onClick={()=>setActiveSection(s)} style={{
-            flex:1,background:"none",border:"none",
-            borderBottom:`2px solid ${activeSection===s?"#e8ff6b":"transparent"}`,
-            color:activeSection===s?"#e8ff6b":"#333",
-            fontFamily:"'JetBrains Mono',monospace",fontSize:8,letterSpacing:1,
-            padding:"0 0 10px",cursor:"pointer",transition:"all 0.2s"
-          }}>{SECTION_LABELS[i]}</button>
-        ))}
+      {/* ── SUMMARY STATS ── */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:20}}>
+        {S("WEEK",`${currentWeek}/8`)}
+        {S("KM RAN",`${totalKm}`,"total","#6bb8ff")}
+        {S("WEIGHT",latestBW?`${latestBW.kg}`:"—","kg",latestBW?"#e8ff6b":"#333")}
       </div>
 
-      {/* ── CONSISTENCY ── */}
-      {activeSection==="consistency"&&(
-        <div>
-          {/* Summary stats */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:24}}>
-            {[
-              ["SESSIONS",`${totalDone}`,"done"],
-              ["STREAK",`${streak}`,"days"],
-              ["WEEK",`${currentWeek}/8`,""]
-            ].map(([label,val,sub])=>(
-              <div key={label} style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:"14px 10px",textAlign:"center"}}>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#444",letterSpacing:2,marginBottom:6}}>{label}</div>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:28,fontWeight:700,color:"#e8ff6b",lineHeight:1}}>{val}</div>
-                {sub&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#444",marginTop:4}}>{sub}</div>}
-              </div>
-            ))}
-          </div>
-
-          {/* Heatmap grid */}
-          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:24}}>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:16}}>8-WEEK HEATMAP</div>
-            <div style={{display:"grid",gridTemplateColumns:"20px repeat(8,1fr)",gap:5,alignItems:"center"}}>
-              {/* Row labels */}
-              <div/>
-              {Array.from({length:8},(_,i)=>(
-                <div key={i} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:i+1===currentWeek?"#e8ff6b":"#2a2a2a",textAlign:"center"}}>W{i+1}</div>
-              ))}
-              {["A","B","C"].map((day,di)=>(
-                <>
-                  <div key={`l${di}`} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333"}}>D{day}</div>
-                  {Array.from({length:8},(_,wi)=>{
-                    const status=weekStatus[wi].days[di];
-                    const bg=status==="done"?"#6abf40":status==="partial"?"#e8a82a":"#141414";
-                    const isCurrent=wi+1===currentWeek;
-                    return (
-                      <div key={wi} style={{
-                        height:22,borderRadius:4,background:bg,
-                        border:`1px solid ${isCurrent?"#e8ff6b44":status==="done"?"#3a6a2a":status==="partial"?"#5a4a1a":"#1e1e1e"}`,
-                        display:"flex",alignItems:"center",justifyContent:"center"
-                      }}>
-                        {status==="done"&&<span style={{fontSize:8,color:"#1a3a1a"}}>✓</span>}
-                      </div>
-                    );
-                  })}
-                </>
-              ))}
-            </div>
-            <div style={{display:"flex",gap:14,marginTop:14}}>
-              {[["#6abf40","Complete"],["#e8a82a","Partial"],["#141414","Pending"]].map(([c,l])=>(
-                <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
-                  <div style={{width:8,height:8,borderRadius:2,background:c}}/>
-                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333"}}>{l}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+      {/* ── HEATMAP ── */}
+      <Card title="8-WEEK HEATMAP">
+        <div style={{display:"grid",gridTemplateColumns:"20px repeat(8,1fr)",gap:4,alignItems:"center"}}>
+          <div/>
+          {Array.from({length:8},(_,i)=>(
+            <div key={i} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:i+1===currentWeek?"#e8ff6b":"#2a2a2a",textAlign:"center"}}>W{i+1}</div>
+          ))}
+          {["A","B","C"].map((day,di)=>(
+            <>{/* fragment key workaround */}
+              <div key={`l${di}`} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333"}}>D{day}</div>
+              {weekStatus.map(({week,days})=>{
+                const status=days[di];
+                const bg=status==="done"?"#6abf40":status==="partial"?"#e8a82a":"#141414";
+                const isCur=week===currentWeek;
+                return (
+                  <div key={week} style={{height:20,borderRadius:3,background:bg,border:`1px solid ${isCur?"#e8ff6b44":status==="done"?"#3a6a2a":status==="partial"?"#5a4a1a":"#1e1e1e"}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    {status==="done"&&<span style={{fontSize:7,color:"#1a3a1a"}}>✓</span>}
+                  </div>
+                );
+              })}
+            </>
+          ))}
         </div>
-      )}
+        <div style={{display:"flex",gap:14,marginTop:12}}>
+          {[["#6abf40","Complete"],["#e8a82a","Partial"],["#141414","Pending"]].map(([c,l])=>(
+            <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+              <div style={{width:7,height:7,borderRadius:2,background:c}}/>
+              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333"}}>{l}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       {/* ── LIFTS ── */}
-      {activeSection==="lifts"&&(
-        <div>
-          <select value={selectedEx} onChange={e=>setSelectedEx(e.target.value)} style={{width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",color:"#e0e0e0",fontFamily:"'JetBrains Mono',monospace",fontSize:12,padding:"10px 12px",borderRadius:8,marginBottom:20,outline:"none"}}>
-            {allEx.map(e=><option key={e} value={e}>{e}</option>)}
-          </select>
-
-          {/* Average weight per week bar chart */}
-          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16}}>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:16}}>AVG WEIGHT PER WEEK</div>
-            <BarChart bars={liftBars} unit="kg" height={110}/>
-          </div>
-
-          {/* Per-day line charts */}
-          {liftLines.map(({day,pts})=>{
-            const color=day==="A"?"#e8ff6b":day==="B"?"#6abf40":"#6bb8ff";
-            const f=pts.map(p=>p.y);
-            const delta=f.length>=2?+(f[f.length-1]-f[0]).toFixed(1):null;
-            return (
-              <div key={day} style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3}}>DAY {day}</div>
-                  {delta!==null&&(
-                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:delta>0?"#6abf40":delta<0?"#ff6b6b":"#444"}}>
-                      {delta>0?"+":""}{delta} kg
-                    </div>
-                  )}
-                </div>
-                <LineChart points={pts} color={color} height={100} unit="kg"/>
-              </div>
-            );
-          })}
-          {liftLines.every(l=>l.pts.length<2)&&(
-            <div style={{textAlign:"center",padding:"32px 0",fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#2a2a2a"}}>
-              log more sessions to see trends
-            </div>
-          )}
+      <Card title="LIFT PROGRESSION" right={<ChartToggle mode={liftMode} onChange={setLiftMode}/>}>
+        <select value={selectedEx} onChange={e=>setSelectedEx(e.target.value)} style={{width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",color:"#e0e0e0",fontFamily:"'JetBrains Mono',monospace",fontSize:11,padding:"8px 10px",borderRadius:6,marginBottom:16,outline:"none"}}>
+          {allEx.map(e=><option key={e} value={e}>{e}</option>)}
+        </select>
+        {/* Combined avg across days */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333",letterSpacing:2,marginBottom:10}}>AVG ACROSS DAYS</div>
+          <Chart points={liftPoints} mode={liftMode} color="#e8ff6b" unit="kg" height={110}/>
         </div>
-      )}
+        {/* Per day breakdown */}
+        {liftByDay.map(({day,color,points})=>{
+          const valid=points.filter(p=>p&&p.y!=null);
+          if(valid.length===0) return null;
+          const delta=valid.length>=2?+(valid[valid.length-1].y-valid[0].y).toFixed(1):null;
+          return (
+            <div key={day} style={{borderTop:"1px solid #111",paddingTop:12,marginTop:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333",letterSpacing:2}}>DAY {day}</span>
+                {delta!==null&&<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:delta>0?"#6abf40":delta<0?"#ff6b6b":"#444"}}>{delta>0?"+":""}{delta}kg</span>}
+              </div>
+              <Chart points={points} mode={liftMode} color={color} unit="kg" height={90}/>
+            </div>
+          );
+        })}
+      </Card>
 
       {/* ── RUNS ── */}
-      {activeSection==="runs"&&(
-        <div>
-          {/* Total km stat */}
-          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16,display:"flex",alignItems:"baseline",gap:8}}>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:42,fontWeight:700,color:"#6bb8ff"}}>{totalKm}</div>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,color:"#444"}}>km total</div>
-          </div>
-
-          {/* Weekly km bar chart */}
-          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16}}>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:16}}>KM PER WEEK</div>
-            <BarChart bars={runBars} unit="km" height={110} color="#6bb8ff"/>
-          </div>
-
-          {/* Per-day run line charts */}
-          {["A","B","C"].map(day=>{
-            const color=day==="A"?"#e8ff6b":day==="B"?"#6abf40":"#6bb8ff";
-            const pts=Array.from({length:8},(_,i)=>{
-              const v=data[day]?.[i+1]?.runKm??null;
-              return v!==null?{x:i+1,y:v,label:`W${i+1}`}:null;
-            }).filter(Boolean);
-            const runLabel=PROGRAM[day].run.type==="intervals"?"INTERVALS":day==="C"?"LONG EASY":"EASY";
-            return (
-              <div key={day} style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:12}}>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:12}}>
-                  DAY {day} — {runLabel}
-                </div>
-                <LineChart points={pts} color={color} height={90} unit="km"/>
-              </div>
-            );
-          })}
+      <Card title="RUN DISTANCES" right={<ChartToggle mode={runMode} onChange={setRunMode}/>}>
+        <div style={{marginBottom:16}}>
+          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333",letterSpacing:2,marginBottom:10}}>TOTAL KM PER WEEK</div>
+          <Chart points={runPoints} mode={runMode} color="#6bb8ff" unit="km" height={110}/>
         </div>
-      )}
-
-      {/* ── WEIGHT ── */}
-      {activeSection==="weight"&&(
-        <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-            <div>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:6}}>CURRENT</div>
-              <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:48,fontWeight:700,color:latestBW?"#e8ff6b":"#222",lineHeight:1}}>
-                  {latestBW?latestBW.kg:"—"}
-                </div>
-                {latestBW&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,color:"#555"}}>kg</div>}
-              </div>
-              {bwEntries.length>=2&&(
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,marginTop:4,
-                  color:bwEntries[bwEntries.length-1].kg<bwEntries[0].kg?"#6abf40":bwEntries[bwEntries.length-1].kg>bwEntries[0].kg?"#ff6b6b":"#444"
-                }}>
-                  {(bwEntries[bwEntries.length-1].kg-bwEntries[0].kg)>0?"+":""}{(bwEntries[bwEntries.length-1].kg-bwEntries[0].kg).toFixed(1)} kg since start
-                </div>
-              )}
+        {runByDay.map(({day,label,color,points})=>{
+          const valid=points.filter(p=>p&&p.y!=null);
+          if(valid.length===0) return null;
+          return (
+            <div key={day} style={{borderTop:"1px solid #111",paddingTop:12,marginTop:12}}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333",letterSpacing:2,marginBottom:10}}>DAY {day} — {label}</div>
+              <Chart points={points} mode={runMode} color={color} unit="km" height={90}/>
             </div>
-            <button onClick={()=>setShowWeightPad(true)} style={{background:"#e8ff6b",border:"none",borderRadius:8,color:"#060606",fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,padding:"10px 16px",cursor:"pointer",letterSpacing:1}}>+ LOG</button>
-          </div>
+          );
+        })}
+      </Card>
 
-          {/* Line chart */}
-          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16}}>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:12}}>WEIGHT OVER TIME</div>
-            <LineChart
-              points={bwEntries.map((e,i)=>({x:i,y:e.kg,label:e.date.slice(5)}))}
-              color="#e8ff6b" height={130} unit="kg"
-              yMin={bwEntries.length>0?Math.min(...bwEntries.map(e=>e.kg))-1:null}
-              yMax={bwEntries.length>0?Math.max(...bwEntries.map(e=>e.kg))+1:null}
-            />
-          </div>
-
-          {/* Log history */}
-          <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16}}>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3,marginBottom:12}}>HISTORY</div>
-            {bwEntries.length===0&&(
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#2a2a2a",textAlign:"center",padding:"20px 0"}}>no entries yet</div>
-            )}
+      {/* ── BODY WEIGHT ── */}
+      <Card title="BODY WEIGHT" right={
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <ChartToggle mode={bwMode} onChange={setBwMode}/>
+          <button onClick={()=>setShowWeightPad(true)} style={{background:"#e8ff6b",border:"none",borderRadius:5,color:"#060606",fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:700,padding:"4px 10px",cursor:"pointer"}}>+ LOG</button>
+        </div>
+      }>
+        <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:16}}>
+          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:40,fontWeight:700,color:latestBW?"#e8ff6b":"#222",lineHeight:1}}>{latestBW?latestBW.kg:"—"}</div>
+          {latestBW&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,color:"#444"}}>kg</div>}
+          {bwDelta!==null&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:bwDelta<0?"#6abf40":bwDelta>0?"#ff6b6b":"#444",marginLeft:4}}>{bwDelta>0?"+":""}{bwDelta} kg</div>}
+        </div>
+        <Chart
+          points={bwPoints}
+          mode={bwMode} color="#e8ff6b" unit="kg" height={120}
+        />
+        {bwEntries.length>0&&(
+          <div style={{marginTop:14,maxHeight:120,overflowY:"auto"}}>
             {[...bwEntries].reverse().map((e,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #111"}}>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#444"}}>{e.date}</span>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,color:"#e0e0e0"}}>{e.kg} kg</span>
+              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #0f0f0f"}}>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#333"}}>{e.date}</span>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"#777"}}>{e.kg} kg</span>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </Card>
 
-      {/* CSV Export — always visible at bottom */}
-      <div style={{marginTop:32,paddingTop:20,borderTop:"1px solid #111"}}>
-        <button onClick={()=>exportCSV(data)} style={{
-          width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",
-          borderRadius:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",
-          fontSize:10,letterSpacing:2,padding:"14px 0",cursor:"pointer",
-          display:"flex",alignItems:"center",justifyContent:"center",gap:8
-        }}>
+      {/* ── EXPORT ── */}
+      <div style={{paddingTop:8,paddingBottom:8}}>
+        <button onClick={()=>exportCSV(data)} style={{width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",fontSize:10,letterSpacing:2,padding:"14px 0",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
           <span style={{color:"#333"}}>↓</span> EXPORT DATA AS CSV
         </button>
       </div>
 
       {showWeightPad&&(
-        <Numpad
-          value={latestBW?.kg}
-          label="BODY WEIGHT"
-          unit="kg"
+        <Numpad value={latestBW?.kg} label="BODY WEIGHT" unit="kg"
           onConfirm={kg=>{ if(kg!==null) onLogWeight(kg); setShowWeightPad(false); }}
           onClose={()=>setShowWeightPad(false)}
         />
