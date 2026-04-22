@@ -395,7 +395,27 @@ function SessionView({ day, week, data, onUpdateExercise, onUpdateRun }) {
       {prog.exercises.map((ex,i) => {
         const val = exData[ex.name];
         const logged = val !== null && val !== undefined;
+        // Find most recent logged weight for this exercise in a previous week/day
+        let prevVal = null;
+        if (!logged) {
+          // Search backwards through previous weeks for same day
+          for (let w = week - 1; w >= 1; w--) {
+            const prev = data[day]?.[w]?.exercises?.[ex.name];
+            if (prev !== null && prev !== undefined) { prevVal = prev; break; }
+          }
+          // If nothing found in same day, check other days that share this exercise
+          if (prevVal === null) {
+            const otherDays = ["A","B","C"].filter(d=>d!==day);
+            outer: for (let w = week; w >= 1; w--) {
+              for (const d of otherDays) {
+                const prev = data[d]?.[w]?.exercises?.[ex.name];
+                if (prev !== null && prev !== undefined) { prevVal = prev; break outer; }
+              }
+            }
+          }
+        }
         const display = fmt(val);
+        const prevDisplay = fmt(prevVal);
         return (
           <div key={i} onClick={()=>setNumpad({exName:ex.name})} style={{
             display:"flex",alignItems:"center",justifyContent:"space-between",
@@ -408,10 +428,17 @@ function SessionView({ day, week, data, onUpdateExercise, onUpdateRun }) {
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,color:logged?"#cccccc":"#333",marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.name}</div>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#252525"}}>{ex.sets} sets · {ex.reps} reps</div>
             </div>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:700,minWidth:52,textAlign:"right",
-              color: logged ? "#e8ff6b" : "#282828"
-            }}>
-              {display || "—"}
+            <div style={{textAlign:"right",minWidth:52}}>
+              {logged ? (
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:700,color:"#e8ff6b"}}>{display}</div>
+              ) : prevVal !== null ? (
+                <>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:700,color:"#2e2e2e"}}>{prevDisplay}</div>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#2a2a2a",marginTop:1}}>last time</div>
+                </>
+              ) : (
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:700,color:"#1e1e1e"}}>—</div>
+              )}
             </div>
           </div>
         );
