@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="110" fill="#060606"/>
+
+  <!-- ══ LEFT ARM ══ -->
+  <!-- forearm bottom left -->
+  <ellipse cx="90" cy="390" rx="36" ry="70" fill="#f5c842" transform="rotate(-25 90 390)"/>
+  <!-- upper arm -->
+  <ellipse cx="128" cy="258" rx="34" ry="78" fill="#f5c842" transform="rotate(15 128 258)"/>
+  <!-- BICEP — one solid round mass -->
+  <circle cx="76" cy="210" r="74" fill="#f5c842"/>
+  <!-- highlight -->
+  <circle cx="54" cy="182" r="28" fill="#ffd84d" opacity="0.75"/>
+  <!-- dark shadow for roundness -->
+  <circle cx="92" cy="232" r="50" fill="#e8b420" opacity="0.3"/>
+  <!-- veins -->
+  <path d="M48 195 Q68 228 88 262 Q105 288 118 315" stroke="#a06000" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <path d="M68 180 Q80 210 86 240" stroke="#a06000" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.65"/>
+  <path d="M30 218 Q46 244 56 270" stroke="#a06000" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.55"/>
+  <!-- elbow -->
+  <circle cx="130" cy="328" r="30" fill="#f0b820"/>
+
+  <!-- ══ RIGHT ARM ══ -->
+  <ellipse cx="422" cy="390" rx="36" ry="70" fill="#f5c842" transform="rotate(25 422 390)"/>
+  <ellipse cx="384" cy="258" rx="34" ry="78" fill="#f5c842" transform="rotate(-15 384 258)"/>
+  <circle cx="436" cy="210" r="74" fill="#f5c842"/>
+  <circle cx="458" cy="182" r="28" fill="#ffd84d" opacity="0.75"/>
+  <circle cx="420" cy="232" r="50" fill="#e8b420" opacity="0.3"/>
+  <!-- veins right -->
+  <path d="M464 195 Q444 228 424 262 Q407 288 394 315" stroke="#a06000" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <path d="M444 180 Q432 210 426 240" stroke="#a06000" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.65"/>
+  <path d="M482 218 Q466 244 456 270" stroke="#a06000" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.55"/>
+  <circle cx="382" cy="328" r="30" fill="#f0b820"/>
+
+  <!-- ══ FACE ══ -->
+  <circle cx="256" cy="330" r="105" fill="#f5c842"/>
+  <!-- subtle shading -->
+  <circle cx="256" cy="350" r="95" fill="#edb020" opacity="0.18"/>
+
+  <!-- Sunglasses -->
+  <rect x="168" y="292" width="76" height="46" rx="18" fill="#111"/>
+  <rect x="268" y="292" width="76" height="46" rx="18" fill="#111"/>
+  <!-- bridge -->
+  <rect x="243" y="305" width="26" height="10" rx="5" fill="#111"/>
+  <!-- temples -->
+  <rect x="130" y="302" width="42" height="10" rx="5" fill="#111"/>
+  <rect x="340" y="302" width="42" height="10" rx="5" fill="#111"/>
+  <!-- lens sheen -->
+  <ellipse cx="194" cy="305" rx="18" ry="10" fill="#2a2a2a" opacity="0.75"/>
+  <ellipse cx="294" cy="305" rx="18" ry="10" fill="#2a2a2a" opacity="0.75"/>
+
+  <!-- Big grin -->
+  <path d="M192 360 Q256 420 320 360" stroke="#1a1a1a" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <path d="M198 368 Q256 414 314 368 Q256 394 198 368Z" fill="white"/>
+
+  <!-- Cheeks -->
+  <ellipse cx="178" cy="356" rx="18" ry="12" fill="#f09040" opacity="0.42"/>
+  <ellipse cx="334" cy="356" rx="18" ry="12" fill="#f09040" opacity="0.42"/>
+</svg>
