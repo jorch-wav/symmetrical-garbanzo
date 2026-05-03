@@ -351,28 +351,87 @@ function Sparkline({ values, color="#e8ff6b" }) {
 
 // ─── WARMUP NAME INPUT ───────────────────────────────────────────────────────
 
-function WarmupNameInput({ value, onConfirm, onClose }) {
-  const [val, setVal] = useState(value || "");
-  const suggestions = ["Rowing machine","Skip rope","Cycling","Assault bike","Stair climber","Elliptical","Swimming"];
+// ─── SWIPE TO DELETE ─────────────────────────────────────────────────────────
+
+function SwipeToDelete({ children, onDelete }) {
+  const [offsetX, setOffsetX] = useState(0);
+  const [swiping, setSwiping] = useState(false);
+  const startX = useRef(null);
+  const THRESHOLD = 80;
+
+  const onTouchStart = (e) => { startX.current = e.touches[0].clientX; setSwiping(true); };
+  const onTouchMove  = (e) => {
+    if (startX.current === null) return;
+    const dx = e.touches[0].clientX - startX.current;
+    if (dx < 0) setOffsetX(Math.max(-120, dx));
+  };
+  const onTouchEnd = () => {
+    if (offsetX < -THRESHOLD) { onDelete(); }
+    else { setOffsetX(0); }
+    setSwiping(false);
+    startX.current = null;
+  };
+
+  return (
+    <div style={{ position:"relative", overflow:"hidden", marginBottom:6, borderRadius:8 }}>
+      {/* Delete background */}
+      <div style={{ position:"absolute", right:0, top:0, bottom:0, width:80, background:"#7a1a1a", display:"flex", alignItems:"center", justifyContent:"center", borderRadius:"0 8px 8px 0" }}>
+        <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:10, color:"#ff6b6b", letterSpacing:1 }}>DELETE</span>
+      </div>
+      {/* Content */}
+      <div
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={{ transform:`translateX(${offsetX}px)`, transition: swiping ? "none" : "transform 0.25s ease", position:"relative", zIndex:1 }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function WarmupModal({ onConfirm, onClose }) {
+  const [name, setName] = useState("");
+  const [mins, setMins] = useState("");
+  const suggestions = ["Rowing machine","Skip rope","Cycling","Assault bike","Stair climber","Elliptical","Swimming","Foam rolling"];
+  const save = () => {
+    if (!name.trim()) return;
+    onConfirm({ name: name.trim(), min: parseFloat(mins)||null });
+  };
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",zIndex:300,backdropFilter:"blur(6px)"}} onClick={onClose}>
       <div style={{width:"100%",maxWidth:400,background:"#0d0d0d",borderTop:"1px solid #2a2a2a",padding:"16px 16px 36px",borderRadius:"16px 16px 0 0"}} onClick={e=>e.stopPropagation()}>
-        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#555",letterSpacing:3,textAlign:"center",marginBottom:10}}>EXERCISE NAME</div>
-        <input
-          autoFocus
-          value={val}
-          onChange={e=>setVal(e.target.value)}
-          placeholder="e.g. Rowing machine"
-          style={{width:"100%",background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,color:"#e8ff6b",fontFamily:"'JetBrains Mono',monospace",fontSize:18,padding:"12px 14px",outline:"none",boxSizing:"border-box",marginBottom:14}}
-        />
-        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#555",letterSpacing:3,textAlign:"center",marginBottom:14}}>ADD CARDIO</div>
+        {/* Name + duration on one row */}
+        <div style={{display:"flex",gap:8,marginBottom:14}}>
+          <input
+            autoFocus
+            value={name}
+            onChange={e=>setName(e.target.value)}
+            placeholder="exercise"
+            style={{flex:1,background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,color:"#e8ff6b",fontFamily:"'JetBrains Mono',monospace",fontSize:15,padding:"11px 12px",outline:"none"}}
+          />
+          <div style={{display:"flex",alignItems:"center",gap:4,background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,padding:"0 12px"}}>
+            <input
+              value={mins}
+              onChange={e=>setMins(e.target.value.replace(/[^0-9]/g,""))}
+              placeholder="min"
+              inputMode="numeric"
+              style={{width:42,background:"none",border:"none",color:"#6bb8ff",fontFamily:"'JetBrains Mono',monospace",fontSize:15,outline:"none",textAlign:"center"}}
+            />
+            <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#444"}}>m</span>
+          </div>
+        </div>
+        {/* Quick picks */}
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>
           {suggestions.map(s=>(
-            <button key={s} onClick={()=>setVal(s)} style={{background:val===s?"#e8ff6b":"#141414",border:`1px solid ${val===s?"#e8ff6b":"#222"}`,borderRadius:20,color:val===s?"#0d0d0d":"#666",fontFamily:"'JetBrains Mono',monospace",fontSize:10,padding:"5px 10px",cursor:"pointer"}}>{s}</button>
+            <button key={s} onClick={()=>setName(s)} style={{background:name===s?"#e8ff6b":"#141414",border:`1px solid ${name===s?"#e8ff6b":"#222"}`,borderRadius:20,color:name===s?"#0d0d0d":"#666",fontFamily:"'JetBrains Mono',monospace",fontSize:10,padding:"5px 10px",cursor:"pointer"}}>{s}</button>
           ))}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <button onClick={onClose} style={{background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",fontSize:14,padding:"14px 0",cursor:"pointer"}}>CANCEL</button>
-          <button onClick={()=>onConfirm(val.trim()||"Exercise")} style={{background:"#e8ff6b",border:"none",borderRadius:8,color:"#0d0d0d",fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700,padding:"14px 0",cursor:"pointer"}}>SAVE</button>
+          <button onClick={save} style={{background:name?"#e8ff6b":"#1e1e1e",border:"none",borderRadius:8,color:name?"#0d0d0d":"#333",fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700,padding:"14px 0",cursor:"pointer"}}>ADD</button>
         </div>
       </div>
     </div>
@@ -382,8 +441,8 @@ function WarmupNameInput({ value, onConfirm, onClose }) {
 // ─── SESSION VIEW ─────────────────────────────────────────────────────────────
 
 function SessionView({ day, week, data, onUpdateExercise, onUpdateRun, onAddWarmup, onEditWarmup, onRemoveWarmup }) {
-  const [numpad, setNumpad]       = useState(null); // {exName} | {type:"km"} | {type:"warmup",idx,field}
-  const [warmupText, setWarmupText] = useState(null); // {idx, field, value} for name editing 
+  const [numpad, setNumpad]         = useState(null); // {exName} | {type:"km"}
+  const [showWarmupModal, setShowWarmupModal] = useState(false); 
   const [showTimer, setShowTimer] = useState(false);
 
   const prog     = PROGRAM[day];
@@ -427,28 +486,23 @@ function SessionView({ day, week, data, onUpdateExercise, onUpdateRun, onAddWarm
       <div style={{marginBottom:20}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
           <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#333",letterSpacing:3}}>PRE-STRENGTH CARDIO</div>
-          <button onClick={()=>onAddWarmup(day,week)} style={{background:"none",border:"1px solid #1e1e1e",borderRadius:5,color:"#555",fontFamily:"'JetBrains Mono',monospace",fontSize:13,width:26,height:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>+</button>
+          <button onClick={()=>setShowWarmupModal(true)} style={{background:"none",border:"1px solid #1e1e1e",borderRadius:5,color:"#555",fontFamily:"'JetBrains Mono',monospace",fontSize:13,width:26,height:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>+</button>
         </div>
         {warmup.length===0&&(
-          <div onClick={()=>onAddWarmup(day,week)} style={{padding:"10px 14px",background:"#090909",border:"1px dashed #1a1a1a",borderRadius:8,cursor:"pointer",textAlign:"center"}}>
+          <div onClick={()=>setShowWarmupModal(true)} style={{padding:"10px 14px",background:"#090909",border:"1px dashed #1a1a1a",borderRadius:8,cursor:"pointer",textAlign:"center"}}>
             <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"#2a2a2a"}}>+ add cardio warmup</span>
           </div>
         )}
         {warmup.map((item,idx)=>(
-          <div key={item.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-            <div style={{flex:1,background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,padding:"10px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div onClick={()=>setWarmupText({idx,field:"name",value:item.name||""})} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,color:item.name?"#ccc":"#333",cursor:"pointer",minWidth:80}}>
-                {item.name||<span style={{color:"#2a2a2a"}}>exercise</span>}
-              </div>
-              <div onClick={()=>setNumpad({type:"warmup",idx})} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:700,color:item.min?"#6bb8ff":"#2a2a2a",cursor:"pointer"}}>
-                {item.min?`${item.min}m`:"—"}
-              </div>
+          <SwipeToDelete key={item.id} onDelete={()=>onRemoveWarmup(day,week,idx)}>
+            <div style={{background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,padding:"11px 14px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,color:item.name?"#ccc":"#444"}}>{item.name||"exercise"}</span>
+              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:700,color:item.min?"#6bb8ff":"#2a2a2a"}}>{item.min?`${item.min}m`:"—"}</span>
             </div>
-            <button onClick={()=>onRemoveWarmup(day,week,idx)} style={{background:"none",border:"none",color:"#2a2a2a",fontFamily:"'JetBrains Mono',monospace",fontSize:16,cursor:"pointer",padding:"0 4px"}}>×</button>
-          </div>
+          </SwipeToDelete>
         ))}
         {warmup.length>0&&(
-          <button onClick={()=>onAddWarmup(day,week)} style={{width:"100%",background:"none",border:"1px dashed #1a1a1a",borderRadius:8,color:"#2a2a2a",fontFamily:"'JetBrains Mono',monospace",fontSize:11,padding:"7px 0",cursor:"pointer",marginTop:4}}>+ another</button>
+          <button onClick={()=>setShowWarmupModal(true)} style={{width:"100%",background:"none",border:"1px dashed #1a1a1a",borderRadius:8,color:"#2a2a2a",fontFamily:"'JetBrains Mono',monospace",fontSize:11,padding:"7px 0",cursor:"pointer",marginTop:6}}>+ another</button>
         )}
       </div>
 
@@ -564,20 +618,10 @@ function SessionView({ day, week, data, onUpdateExercise, onUpdateRun, onAddWarm
           onClose={()=>setNumpad(null)}
         />
       )}
-      {numpad?.type==="warmup" && (
-        <Numpad
-          value={warmup[numpad.idx]?.min}
-          label="DURATION"
-          unit="min"
-          onConfirm={val=>{ onEditWarmup(day,week,numpad.idx,"min",val); setNumpad(null); }}
-          onClose={()=>setNumpad(null)}
-        />
-      )}
-      {warmupText && (
-        <WarmupNameInput
-          value={warmupText.value}
-          onConfirm={val=>{ onEditWarmup(day,week,warmupText.idx,"name",val); setWarmupText(null); }}
-          onClose={()=>setWarmupText(null)}
+      {showWarmupModal && (
+        <WarmupModal
+          onConfirm={({name,min})=>{ onAddWarmup(day,week,{name,min}); setShowWarmupModal(false); }}
+          onClose={()=>setShowWarmupModal(false)}
         />
       )}
     </div>
@@ -744,13 +788,12 @@ function importJSON(file, onSuccess, onError) {
 // ─── RADAR CHART ─────────────────────────────────────────────────────────────
 
 function RadarChart({ weeklyData, exercises, currentWeek }) {
-  // weeklyData: array of {week, values: {exName: kg}}
-  // exercises: [{name, label}]
-  const [tooltip, setTooltip] = useState(null); // {x,y,week,ex,val}
-  const W = 300, H = 300, cx = 150, cy = 150, maxR = 110;
+  const [tooltip, setTooltip] = useState(null);
+  const W = 300, H = 300, cx = 150, cy = 158, maxR = 90;
   const n = exercises.length;
 
-  // Compute max per exercise across all weeks for normalisation
+  const WEEK_COLORS = ["#6bb8ff","#a78bfa","#34d399","#fb923c","#f472b6","#60a5fa","#facc15","#e8ff6b"];
+
   const maxPerEx = {};
   exercises.forEach(ex => {
     const vals = weeklyData.map(w => w.values[ex.name]).filter(v => v != null && v > 0);
@@ -758,131 +801,93 @@ function RadarChart({ weeklyData, exercises, currentWeek }) {
   });
 
   const angle = (i) => (Math.PI * 2 * i / n) - Math.PI / 2;
-  const point = (i, r) => ({
-    x: cx + r * Math.cos(angle(i)),
-    y: cy + r * Math.sin(angle(i))
+  const point = (i, r) => ({ x: cx + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)) });
+
+  const weekPts = (values) => exercises.map((ex, i) => {
+    const v = values[ex.name];
+    const r = (v != null && v > 0) ? Math.max(14, (v / maxPerEx[ex.name]) * maxR) : 14;
+    return point(i, r);
   });
 
-  const polygon = (values, scale=1) => {
-    return exercises.map((ex, i) => {
-      const v = values[ex.name];
-      const r = (v != null && v > 0)
-        ? Math.max(18, (v / maxPerEx[ex.name]) * maxR * scale)
-        : 18;
-      return point(i, r);
-    });
-  };
+  const toPath = (pts) => pts.map((p,i) => `${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ") + "Z";
 
-  const toPath = (pts) => pts.map((p,i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + 'Z';
-
-  // Grid rings
-  const gridRings = [0.33, 0.66, 1.0];
-
-  // Week colours — oldest fades out, newest is bold yellow
-  const filledWeeks = weeklyData.filter(w =>
-    Object.values(w.values).some(v => v != null)
-  );
+  const filledWeeks = weeklyData.filter(w => Object.values(w.values).some(v => v != null));
+  const latestWeek = filledWeeks[filledWeeks.length - 1];
 
   return (
-    <div style={{ position: 'relative', userSelect: 'none' }}>
-      <svg
-        width="100%" viewBox={`0 0 ${W} ${H}`}
-        style={{ display: 'block', touchAction: 'none' }}
+    <div style={{ position:"relative", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`}
+        style={{ display:"block", touchAction:"none", WebkitUserSelect:"none", userSelect:"none" }}
         onPointerLeave={() => setTooltip(null)}
       >
-        {/* Grid rings */}
-        {gridRings.map((r, i) => (
+        {[0.33, 0.66, 1.0].map((r, i) => (
           <polygon key={i}
-            points={exercises.map((_,j) => {
-              const p = point(j, r * maxR);
-              return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
-            }).join(' ')}
+            points={exercises.map((_,j) => { const p = point(j, r*maxR); return `${p.x.toFixed(1)},${p.y.toFixed(1)}`; }).join(" ")}
             fill="none" stroke="#1e1e1e" strokeWidth={1}
           />
         ))}
-        {/* Axes */}
         {exercises.map((ex, i) => {
-          const p = point(i, maxR + 8);
-          const axis = point(i, maxR);
+          const lp = point(i, maxR + 24);
+          const ap = point(i, maxR);
+          const ang = angle(i);
+          const anchor = Math.abs(Math.cos(ang)) < 0.25 ? "middle" : Math.cos(ang) > 0 ? "start" : "end";
           return (
             <g key={i}>
-              <line x1={cx} y1={cy} x2={axis.x.toFixed(1)} y2={axis.y.toFixed(1)}
-                stroke="#1e1e1e" strokeWidth={1}/>
-              <text x={p.x.toFixed(1)} y={p.y.toFixed(1)}
-                fill="#444" fontSize={7} textAnchor="middle"
-                dominantBaseline="middle" fontFamily="monospace">
+              <line x1={cx} y1={cy} x2={ap.x.toFixed(1)} y2={ap.y.toFixed(1)} stroke="#222" strokeWidth={1}/>
+              <text x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fill="#666" fontSize={9}
+                textAnchor={anchor} dominantBaseline="middle" fontFamily="monospace"
+                style={{ pointerEvents:"none" }}>
                 {ex.label}
               </text>
             </g>
           );
         })}
-
-        {/* Week polygons — oldest first so newest renders on top */}
         {filledWeeks.map((wd, wi) => {
-          const isLatest = wd.week === currentWeek ||
-            wi === filledWeeks.length - 1;
-          const age = filledWeeks.length - 1 - wi;
-          const opacity = isLatest ? 0.85 : Math.max(0.08, 0.45 - age * 0.1);
-          const stroke = isLatest ? '#e8ff6b' : '#6abf40';
-          const fill   = isLatest ? '#e8ff6b' : '#3a7a20';
-          const pts = polygon(wd.values);
+          const isLatest = wi === filledWeeks.length - 1;
+          const color = WEEK_COLORS[(wd.week - 1) % WEEK_COLORS.length];
+          const opacity = isLatest ? 0.9 : Math.max(0.1, 0.5 - (filledWeeks.length - 1 - wi) * 0.12);
+          const pts = weekPts(wd.values);
           return (
-            <path key={wd.week}
-              d={toPath(pts)}
-              fill={fill} fillOpacity={opacity * 0.35}
-              stroke={stroke} strokeOpacity={opacity}
-              strokeWidth={isLatest ? 2 : 1}
+            <path key={wd.week} d={toPath(pts)}
+              fill={color} fillOpacity={opacity * 0.18}
+              stroke={color} strokeOpacity={opacity}
+              strokeWidth={isLatest ? 2.5 : 1.5}
+              style={{ pointerEvents:"none" }}
             />
           );
         })}
-
-        {/* Tap targets — latest week vertices */}
-        {filledWeeks.length > 0 && (() => {
-          const latest = filledWeeks[filledWeeks.length - 1];
-          const pts = polygon(latest.values);
-          return exercises.map((ex, i) => {
-            const v = latest.values[ex.name];
-            return (
-              <circle key={i}
-                cx={pts[i].x.toFixed(1)} cy={pts[i].y.toFixed(1)} r={10}
-                fill="transparent"
-                onPointerDown={() => setTooltip({ x: pts[i].x, y: pts[i].y, week: latest.week, ex: ex.name, val: v })}
-                style={{ cursor: 'pointer' }}
-              />
-            );
-          });
+        {latestWeek && (() => {
+          const pts = weekPts(latestWeek.values);
+          return exercises.map((ex, i) => (
+            <circle key={i} cx={pts[i].x.toFixed(1)} cy={pts[i].y.toFixed(1)} r={14}
+              fill="transparent"
+              onPointerDown={(e) => { e.preventDefault(); setTooltip({ x:pts[i].x, y:pts[i].y, week:latestWeek.week, ex:ex.name, val:latestWeek.values[ex.name] }); }}
+              style={{ cursor:"pointer", touchAction:"none" }}
+            />
+          ));
         })()}
-
-        {/* Tooltip */}
         {tooltip && (() => {
-          const tx = tooltip.x > cx ? tooltip.x - 60 : tooltip.x + 8;
-          const ty = Math.min(H - 30, Math.max(10, tooltip.y - 16));
-          const display = tooltip.val === 0 ? 'BW' : tooltip.val != null ? `${tooltip.val}kg` : '—';
+          const tx = tooltip.x > cx ? Math.min(W-86, tooltip.x-4) : Math.max(4, tooltip.x-82);
+          const ty = Math.min(H-36, Math.max(4, tooltip.y-18));
+          const display = tooltip.val===0?"BW":tooltip.val!=null?`${tooltip.val}kg`:"—";
+          const exShort = tooltip.ex.replace("Dumbbell ","DB ").replace("Seated ","").replace("Rope ","").replace("Hanging ","").slice(0,16);
           return (
-            <g>
-              <rect x={tx} y={ty} width={70} height={22} rx={5}
-                fill="#0d0d0d" stroke="#e8ff6b" strokeWidth={1}/>
-              <text x={tx + 6} y={ty + 9} fill="#e8ff6b" fontSize={7.5}
-                fontFamily="monospace" dominantBaseline="hanging">
-                {tooltip.ex.replace('Dumbbell ','DB ').replace('Seated ','').replace('Rope ','').slice(0,14)}
-              </text>
-              <text x={tx + 6} y={ty + 13} fill="#e0e0e0" fontSize={8}
-                fontFamily="monospace" dominantBaseline="hanging" fontWeight="bold">
-                W{tooltip.week} · {display}
-              </text>
+            <g style={{ pointerEvents:"none" }}>
+              <rect x={tx} y={ty} width={84} height={30} rx={6} fill="#0d0d0d" stroke="#e8ff6b" strokeWidth={1.2}/>
+              <text x={tx+6} y={ty+10} fill="#777" fontSize={7.5} fontFamily="monospace" dominantBaseline="hanging">{exShort}</text>
+              <text x={tx+6} y={ty+20} fill="#e8ff6b" fontSize={9} fontFamily="monospace" dominantBaseline="hanging" fontWeight="bold">W{tooltip.week} · {display}</text>
             </g>
           );
         })()}
       </svg>
-
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
-        {filledWeeks.slice(-3).map((w, i, arr) => {
-          const isLatest = i === arr.length - 1;
+      <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap", marginTop:6 }}>
+        {filledWeeks.map((w, i) => {
+          const color = WEEK_COLORS[(w.week-1) % WEEK_COLORS.length];
+          const isLatest = i === filledWeeks.length - 1;
           return (
-            <div key={w.week} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <div style={{ width: 20, height: 2, background: isLatest ? '#e8ff6b' : '#3a7a20', opacity: isLatest ? 1 : 0.5, borderRadius: 1 }}/>
-              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: isLatest ? '#e8ff6b' : '#444' }}>W{w.week}</span>
+            <div key={w.week} style={{ display:"flex", alignItems:"center", gap:4 }}>
+              <div style={{ width:16, height:2.5, background:color, borderRadius:2, opacity:isLatest?1:0.5 }}/>
+              <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:isLatest?color:"#444" }}>W{w.week}</span>
             </div>
           );
         })}
@@ -1401,9 +1406,9 @@ export default function App() {
     saveData(parsed);
   };
 
-  const handleAddWarmup = (day,week) => mutate(d=>{
+  const handleAddWarmup = (day,week,item) => mutate(d=>{
     if(!d[day][week].warmup) d[day][week].warmup=[];
-    d[day][week].warmup.push({id:Date.now(),name:"",min:null});
+    d[day][week].warmup.push({id:Date.now(), name:item?.name||"", min:item?.min||null});
   });
 
   const handleEditWarmup = (day,week,idx,field,val) => mutate(d=>{
