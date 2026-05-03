@@ -789,52 +789,95 @@ function importJSON(file, onSuccess, onError) {
 
 function RadarChart({ weeklyData, exercises, currentWeek }) {
   const [tooltip, setTooltip] = useState(null);
-  const W = 300, H = 300, cx = 150, cy = 158, maxR = 90;
+  const W = 300, H = 300, cx = 150, cy = 150;
+  const BASE_R = 60;  // radius of the week-1 baseline circle
+  const MAX_R  = 112; // max radius an axis can reach
+
+  const WEEK_COLORS = ["#6bb8ff","#a78bfa","#34d399","#fb923c","#f472b6","#facc15","#e8ff6b"];
+
   const n = exercises.length;
-
-  const WEEK_COLORS = ["#6bb8ff","#a78bfa","#34d399","#fb923c","#f472b6","#60a5fa","#facc15","#e8ff6b"];
-
-  const maxPerEx = {};
-  exercises.forEach(ex => {
-    const vals = weeklyData.map(w => w.values[ex.name]).filter(v => v != null && v > 0);
-    maxPerEx[ex.name] = vals.length ? Math.max(...vals) : 1;
-  });
-
   const angle = (i) => (Math.PI * 2 * i / n) - Math.PI / 2;
-  const point = (i, r) => ({ x: cx + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)) });
 
-  const weekPts = (values) => exercises.map((ex, i) => {
-    const v = values[ex.name];
-    const r = (v != null && v > 0) ? Math.max(14, (v / maxPerEx[ex.name]) * maxR) : 14;
-    return point(i, r);
-  });
+  // Get week 1 values as baseline
+  const baseWeek = weeklyData.find(w => w.week === 1) || weeklyData[0];
+  const filledWeeks = weeklyData.filter(w =>
+    Object.values(w.values).some(v => v != null)
+  );
 
-  const toPath = (pts) => pts.map((p,i) => `${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ") + "Z";
+  // For each axis: radius = BASE_R + extra based on how much MORE than week1
+  const getRadius = (exName, val) => {
+    if (val == null) return BASE_R;
+    const baseVal = baseWeek?.values[exName];
+    if (!baseVal || baseVal === 0) return BASE_R;
+    // How much above baseline? Cap at 2x for visual clarity
+    const ratio = val / baseVal; // 1.0 = same as week 1 = BASE_R
+    const extra = Math.max(0, ratio - 1) * (MAX_R - BASE_R) * 1.2;
+    return Math.min(MAX_R, BASE_R + extra);
+  };
 
-  const filledWeeks = weeklyData.filter(w => Object.values(w.values).some(v => v != null));
+  const weekPoints = (values) =>
+    exercises.map((ex, i) => {
+      const r = getRadius(ex.name, values[ex.name]);
+      return { x: cx + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)), r };
+    });
+
+  // Smooth closed bezier blob through points
+  const blobPath = (pts) => {
+    if (pts.length < 2) return "";
+    const n = pts.length;
+    // Control points: use adjacent points to create smooth curves
+    const cp = pts.map((p, i) => {
+      const prev = pts[(i - 1 + n) % n];
+      const next = pts[(i + 1) % n];
+      const tension = 0.35;
+      return {
+        cp1x: p.x - (next.x - prev.x) * tension,
+        cp1y: p.y - (next.y - prev.y) * tension,
+        cp2x: p.x + (next.x - prev.x) * tension,
+        cp2y: p.y + (next.y - prev.y) * tension,
+      };
+    });
+    let d = `M ${pts[0].x.toFixed(2)},${pts[0].y.toFixed(2)}`;
+    for (let i = 0; i < n; i++) {
+      const next = pts[(i + 1) % n];
+      d += ` C ${cp[i].cp2x.toFixed(2)},${cp[i].cp2y.toFixed(2)} ${cp[(i+1)%n].cp1x.toFixed(2)},${cp[(i+1)%n].cp1y.toFixed(2)} ${next.x.toFixed(2)},${next.y.toFixed(2)}`;
+    }
+    return d + " Z";
+  };
+
+  // Perfect circle path at BASE_R
+  const circlePath = () => {
+    const r = BASE_R;
+    return `M ${cx+r},${cy} A ${r},${r} 0 1 1 ${cx+r-0.001},${cy} Z`;
+  };
+
   const latestWeek = filledWeeks[filledWeeks.length - 1];
 
   return (
     <div style={{ position:"relative", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`}
-        style={{ display:"block", touchAction:"none", WebkitUserSelect:"none", userSelect:"none" }}
+        style={{ display:"block", touchAction:"none" }}
         onPointerLeave={() => setTooltip(null)}
       >
-        {[0.33, 0.66, 1.0].map((r, i) => (
-          <polygon key={i}
-            points={exercises.map((_,j) => { const p = point(j, r*maxR); return `${p.x.toFixed(1)},${p.y.toFixed(1)}`; }).join(" ")}
-            fill="none" stroke="#1e1e1e" strokeWidth={1}
-          />
-        ))}
+        <defs>
+          {WEEK_COLORS.map((c, i) => (
+            <radialGradient key={i} id={`rg${i}`} cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor={c} stopOpacity="0.25"/>
+              <stop offset="100%" stopColor={c} stopOpacity="0.05"/>
+            </radialGradient>
+          ))}
+        </defs>
+
+        {/* Axes */}
         {exercises.map((ex, i) => {
-          const lp = point(i, maxR + 24);
-          const ap = point(i, maxR);
+          const lp = { x: cx + (MAX_R+22)*Math.cos(angle(i)), y: cy + (MAX_R+22)*Math.sin(angle(i)) };
+          const ap = { x: cx + MAX_R*Math.cos(angle(i)), y: cy + MAX_R*Math.sin(angle(i)) };
           const ang = angle(i);
           const anchor = Math.abs(Math.cos(ang)) < 0.25 ? "middle" : Math.cos(ang) > 0 ? "start" : "end";
           return (
             <g key={i}>
-              <line x1={cx} y1={cy} x2={ap.x.toFixed(1)} y2={ap.y.toFixed(1)} stroke="#222" strokeWidth={1}/>
-              <text x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fill="#666" fontSize={9}
+              <line x1={cx} y1={cy} x2={ap.x.toFixed(1)} y2={ap.y.toFixed(1)} stroke="#1e1e1e" strokeWidth={1}/>
+              <text x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fill="#555" fontSize={9}
                 textAnchor={anchor} dominantBaseline="middle" fontFamily="monospace"
                 style={{ pointerEvents:"none" }}>
                 {ex.label}
@@ -842,48 +885,80 @@ function RadarChart({ weeklyData, exercises, currentWeek }) {
             </g>
           );
         })}
+
+        {/* Baseline circle — always a perfect circle at BASE_R */}
+        <circle cx={cx} cy={cy} r={BASE_R}
+          fill="none" stroke="#2a2a2a" strokeWidth={1.5} strokeDasharray="3 3"/>
+
+        {/* Outer ring reference */}
+        <circle cx={cx} cy={cy} r={MAX_R} fill="none" stroke="#141414" strokeWidth={1}/>
+
+        {/* Week blobs — oldest to newest */}
         {filledWeeks.map((wd, wi) => {
           const isLatest = wi === filledWeeks.length - 1;
-          const color = WEEK_COLORS[(wd.week - 1) % WEEK_COLORS.length];
-          const opacity = isLatest ? 0.9 : Math.max(0.1, 0.5 - (filledWeeks.length - 1 - wi) * 0.12);
-          const pts = weekPts(wd.values);
+          const isBase   = wd.week === (baseWeek?.week);
+          // Skip baseline week as separate blob — it IS the circle
+          if (isBase && filledWeeks.length > 1) return null;
+          const colorIdx = (wd.week - 1) % WEEK_COLORS.length;
+          const color = WEEK_COLORS[colorIdx];
+          const opacity = isLatest ? 1 : Math.max(0.15, 0.6 - (filledWeeks.length - 1 - wi) * 0.15);
+          const pts = weekPoints(wd.values);
+          const path = isBase ? circlePath() : blobPath(pts);
           return (
-            <path key={wd.week} d={toPath(pts)}
-              fill={color} fillOpacity={opacity * 0.18}
-              stroke={color} strokeOpacity={opacity}
-              strokeWidth={isLatest ? 2.5 : 1.5}
-              style={{ pointerEvents:"none" }}
-            />
+            <g key={wd.week}>
+              <path d={path}
+                fill={`url(#rg${colorIdx})`} fillOpacity={opacity}
+                stroke={color} strokeOpacity={opacity}
+                strokeWidth={isLatest ? 2.5 : 1.5}
+                style={{ pointerEvents:"none" }}
+              />
+            </g>
           );
         })}
+
+        {/* Tap targets on latest week */}
         {latestWeek && (() => {
-          const pts = weekPts(latestWeek.values);
+          const pts = weekPoints(latestWeek.values);
           return exercises.map((ex, i) => (
             <circle key={i} cx={pts[i].x.toFixed(1)} cy={pts[i].y.toFixed(1)} r={14}
               fill="transparent"
-              onPointerDown={(e) => { e.preventDefault(); setTooltip({ x:pts[i].x, y:pts[i].y, week:latestWeek.week, ex:ex.name, val:latestWeek.values[ex.name] }); }}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                setTooltip({ x:pts[i].x, y:pts[i].y, week:latestWeek.week, ex:ex.name, val:latestWeek.values[ex.name] });
+              }}
               style={{ cursor:"pointer", touchAction:"none" }}
             />
           ));
         })()}
+
+        {/* Tooltip */}
         {tooltip && (() => {
-          const tx = tooltip.x > cx ? Math.min(W-86, tooltip.x-4) : Math.max(4, tooltip.x-82);
-          const ty = Math.min(H-36, Math.max(4, tooltip.y-18));
+          const tx = tooltip.x > cx ? Math.min(W-90, tooltip.x) : Math.max(4, tooltip.x-86);
+          const ty = Math.min(H-38, Math.max(4, tooltip.y-18));
           const display = tooltip.val===0?"BW":tooltip.val!=null?`${tooltip.val}kg`:"—";
+          const base = baseWeek?.values[tooltip.ex];
+          const delta = (tooltip.val && base && tooltip.val !== base)
+            ? ` (${tooltip.val > base ? "+" : ""}${(tooltip.val - base).toFixed(1)})`  : "";
           const exShort = tooltip.ex.replace("Dumbbell ","DB ").replace("Seated ","").replace("Rope ","").replace("Hanging ","").slice(0,16);
           return (
             <g style={{ pointerEvents:"none" }}>
-              <rect x={tx} y={ty} width={84} height={30} rx={6} fill="#0d0d0d" stroke="#e8ff6b" strokeWidth={1.2}/>
-              <text x={tx+6} y={ty+10} fill="#777" fontSize={7.5} fontFamily="monospace" dominantBaseline="hanging">{exShort}</text>
-              <text x={tx+6} y={ty+20} fill="#e8ff6b" fontSize={9} fontFamily="monospace" dominantBaseline="hanging" fontWeight="bold">W{tooltip.week} · {display}</text>
+              <rect x={tx} y={ty} width={88} height={32} rx={6} fill="#0d0d0d" stroke="#e8ff6b" strokeWidth={1.2}/>
+              <text x={tx+6} y={ty+10} fill="#666" fontSize={7.5} fontFamily="monospace" dominantBaseline="hanging">{exShort}</text>
+              <text x={tx+6} y={ty+20} fill="#e8ff6b" fontSize={9} fontFamily="monospace" dominantBaseline="hanging" fontWeight="bold">{display}{delta}</text>
             </g>
           );
         })()}
       </svg>
+
+      {/* Legend */}
       <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap", marginTop:6 }}>
-        {filledWeeks.map((w, i) => {
+        <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+          <div style={{ width:16, height:0, border:"1.5px dashed #2a2a2a", borderRadius:1 }}/>
+          <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333" }}>baseline</span>
+        </div>
+        {filledWeeks.filter(w => w.week !== baseWeek?.week || filledWeeks.length===1).map((w, i) => {
           const color = WEEK_COLORS[(w.week-1) % WEEK_COLORS.length];
-          const isLatest = i === filledWeeks.length - 1;
+          const isLatest = w.week === latestWeek?.week;
           return (
             <div key={w.week} style={{ display:"flex", alignItems:"center", gap:4 }}>
               <div style={{ width:16, height:2.5, background:color, borderRadius:2, opacity:isLatest?1:0.5 }}/>
