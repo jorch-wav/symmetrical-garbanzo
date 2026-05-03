@@ -741,102 +741,286 @@ function importJSON(file, onSuccess, onError) {
 
 // ─── PROGRESS TABLE ──────────────────────────────────────────────────────────
 
-function cellColor(val, min, max) {
-  if (val === null || val === undefined) return { bg: "transparent", text: "#222", border: "#111" };
-  if (val === 0) return { bg: "#1a2a1a", text: "#4a7a4a", border: "#2a3a2a" }; // BW
-  if (min === max) return { bg: "#2a3a10", text: "#e8ff6b", border: "#3a5a18" };
-  const t = (val - min) / (max - min);
-  // dark green → yellow gradient
-  const r = Math.round(80 + t * 152);
-  const g = Math.round(140 + t * 115);
-  const b = Math.round(20 + t * 87);
-  const textBright = t > 0.4;
-  return {
-    bg: `rgba(${r},${g},${b},${0.15 + t * 0.25})`,
-    text: textBright ? "#e8ff6b" : "#6a9a30",
-    border: `rgba(${r},${g},${b},0.3)`
-  };
-}
+// ─── RADAR CHART ─────────────────────────────────────────────────────────────
 
-function ProgressTable({ title, rows, weeks = 8, currentWeek, unit = "" }) {
-  // rows: [{ label, dayTag, values: [v1..v8] }]
-  const cols = Array.from({ length: weeks }, (_, i) => i + 1);
+function RadarChart({ weeklyData, exercises, currentWeek }) {
+  // weeklyData: array of {week, values: {exName: kg}}
+  // exercises: [{name, label}]
+  const [tooltip, setTooltip] = useState(null); // {x,y,week,ex,val}
+  const W = 300, H = 300, cx = 150, cy = 150, maxR = 110;
+  const n = exercises.length;
+
+  // Compute max per exercise across all weeks for normalisation
+  const maxPerEx = {};
+  exercises.forEach(ex => {
+    const vals = weeklyData.map(w => w.values[ex.name]).filter(v => v != null && v > 0);
+    maxPerEx[ex.name] = vals.length ? Math.max(...vals) : 1;
+  });
+
+  const angle = (i) => (Math.PI * 2 * i / n) - Math.PI / 2;
+  const point = (i, r) => ({
+    x: cx + r * Math.cos(angle(i)),
+    y: cy + r * Math.sin(angle(i))
+  });
+
+  const polygon = (values, scale=1) => {
+    return exercises.map((ex, i) => {
+      const v = values[ex.name];
+      const r = (v != null && v > 0)
+        ? Math.max(18, (v / maxPerEx[ex.name]) * maxR * scale)
+        : 18;
+      return point(i, r);
+    });
+  };
+
+  const toPath = (pts) => pts.map((p,i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + 'Z';
+
+  // Grid rings
+  const gridRings = [0.33, 0.66, 1.0];
+
+  // Week colours — oldest fades out, newest is bold yellow
+  const filledWeeks = weeklyData.filter(w =>
+    Object.values(w.values).some(v => v != null)
+  );
 
   return (
-    <div style={{ marginBottom: 24 }}>
-      <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: "#444", letterSpacing: 3, marginBottom: 12 }}>{title}</div>
-      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 320 }}>
-          <thead>
-            <tr>
-              <th style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333", textAlign: "left", padding: "0 6px 8px 0", minWidth: 90, fontWeight: 400 }}></th>
-              {cols.map(w => (
-                <th key={w} style={{
-                  fontFamily: "'JetBrains Mono',monospace", fontSize: 8,
-                  color: w === currentWeek ? "#e8ff6b" : "#333",
-                  fontWeight: w === currentWeek ? 700 : 400,
-                  padding: "0 2px 8px", textAlign: "center", minWidth: 36
-                }}>W{w}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, ri) => {
-              const filled = row.values.filter(v => v !== null && v !== undefined && v !== 0);
-              const min = filled.length ? Math.min(...filled) : 0;
-              const max = filled.length ? Math.max(...filled) : 0;
-              return (
-                <tr key={ri}>
-                  <td style={{
-                    fontFamily: "'JetBrains Mono',monospace", fontSize: 9,
-                    color: "#555", padding: "3px 8px 3px 0",
-                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 90
-                  }}>
-                    {row.dayTag && <span style={{ color: "#333", marginRight: 4 }}>{row.dayTag}</span>}
-                    {row.label}
-                  </td>
-                  {cols.map(w => {
-                    const val = row.values[w - 1];
-                    const hasVal = val !== null && val !== undefined;
-                    const c = cellColor(val, min, max);
-                    const display = !hasVal ? "" : val === 0 ? "·" : `${val}${unit}`;
-                    return (
-                      <td key={w} style={{
-                        padding: "3px 2px",
-                        textAlign: "center"
-                      }}>
-                        <div style={{
-                          background: hasVal ? c.bg : "transparent",
-                          border: `1px solid ${hasVal ? c.border : "#111"}`,
-                          borderRadius: 4,
-                          padding: "4px 2px",
-                          fontFamily: "'JetBrains Mono',monospace",
-                          fontSize: val === 0 ? 14 : 9,
-                          color: hasVal ? c.text : "#1a1a1a",
-                          minHeight: 24,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontWeight: w === currentWeek ? 700 : 400
-                        }}>{display}</div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+    <div style={{ position: 'relative', userSelect: 'none' }}>
+      <svg
+        width="100%" viewBox={`0 0 ${W} ${H}`}
+        style={{ display: 'block', touchAction: 'none' }}
+        onPointerLeave={() => setTooltip(null)}
+      >
+        {/* Grid rings */}
+        {gridRings.map((r, i) => (
+          <polygon key={i}
+            points={exercises.map((_,j) => {
+              const p = point(j, r * maxR);
+              return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+            }).join(' ')}
+            fill="none" stroke="#1e1e1e" strokeWidth={1}
+          />
+        ))}
+        {/* Axes */}
+        {exercises.map((ex, i) => {
+          const p = point(i, maxR + 8);
+          const axis = point(i, maxR);
+          return (
+            <g key={i}>
+              <line x1={cx} y1={cy} x2={axis.x.toFixed(1)} y2={axis.y.toFixed(1)}
+                stroke="#1e1e1e" strokeWidth={1}/>
+              <text x={p.x.toFixed(1)} y={p.y.toFixed(1)}
+                fill="#444" fontSize={7} textAnchor="middle"
+                dominantBaseline="middle" fontFamily="monospace">
+                {ex.label}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Week polygons — oldest first so newest renders on top */}
+        {filledWeeks.map((wd, wi) => {
+          const isLatest = wd.week === currentWeek ||
+            wi === filledWeeks.length - 1;
+          const age = filledWeeks.length - 1 - wi;
+          const opacity = isLatest ? 0.85 : Math.max(0.08, 0.45 - age * 0.1);
+          const stroke = isLatest ? '#e8ff6b' : '#6abf40';
+          const fill   = isLatest ? '#e8ff6b' : '#3a7a20';
+          const pts = polygon(wd.values);
+          return (
+            <path key={wd.week}
+              d={toPath(pts)}
+              fill={fill} fillOpacity={opacity * 0.35}
+              stroke={stroke} strokeOpacity={opacity}
+              strokeWidth={isLatest ? 2 : 1}
+            />
+          );
+        })}
+
+        {/* Tap targets — latest week vertices */}
+        {filledWeeks.length > 0 && (() => {
+          const latest = filledWeeks[filledWeeks.length - 1];
+          const pts = polygon(latest.values);
+          return exercises.map((ex, i) => {
+            const v = latest.values[ex.name];
+            return (
+              <circle key={i}
+                cx={pts[i].x.toFixed(1)} cy={pts[i].y.toFixed(1)} r={10}
+                fill="transparent"
+                onPointerDown={() => setTooltip({ x: pts[i].x, y: pts[i].y, week: latest.week, ex: ex.name, val: v })}
+                style={{ cursor: 'pointer' }}
+              />
+            );
+          });
+        })()}
+
+        {/* Tooltip */}
+        {tooltip && (() => {
+          const tx = tooltip.x > cx ? tooltip.x - 60 : tooltip.x + 8;
+          const ty = Math.min(H - 30, Math.max(10, tooltip.y - 16));
+          const display = tooltip.val === 0 ? 'BW' : tooltip.val != null ? `${tooltip.val}kg` : '—';
+          return (
+            <g>
+              <rect x={tx} y={ty} width={70} height={22} rx={5}
+                fill="#0d0d0d" stroke="#e8ff6b" strokeWidth={1}/>
+              <text x={tx + 6} y={ty + 9} fill="#e8ff6b" fontSize={7.5}
+                fontFamily="monospace" dominantBaseline="hanging">
+                {tooltip.ex.replace('Dumbbell ','DB ').replace('Seated ','').replace('Rope ','').slice(0,14)}
+              </text>
+              <text x={tx + 6} y={ty + 13} fill="#e0e0e0" fontSize={8}
+                fontFamily="monospace" dominantBaseline="hanging" fontWeight="bold">
+                W{tooltip.week} · {display}
+              </text>
+            </g>
+          );
+        })()}
+      </svg>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+        {filledWeeks.slice(-3).map((w, i, arr) => {
+          const isLatest = i === arr.length - 1;
+          return (
+            <div key={w.week} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div style={{ width: 20, height: 2, background: isLatest ? '#e8ff6b' : '#3a7a20', opacity: isLatest ? 1 : 0.5, borderRadius: 1 }}/>
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: isLatest ? '#e8ff6b' : '#444' }}>W{w.week}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
+// ─── CARDIO LINE CHART ────────────────────────────────────────────────────────
+
+function CardioLine({ sessions }) {
+  // sessions: [{date, label, totalMin, breakdown:[{name,min}]}]
+  const [tooltip, setTooltip] = useState(null);
+  if (sessions.length === 0) return (
+    <div style={{ padding: '24px 0', textAlign: 'center', fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: '#222' }}>
+      no cardio logged yet
+    </div>
+  );
+
+  const W = 300, H = 140;
+  const pad = { top: 16, right: 16, bottom: 24, left: 28 };
+  const iW = W - pad.left - pad.right;
+  const iH = H - pad.top - pad.bottom;
+
+  const maxMin = Math.max(...sessions.map(s => s.totalMin), 1);
+  const toX = (i) => pad.left + (i / Math.max(sessions.length - 1, 1)) * iW;
+  const toY = (v) => pad.top + (1 - v / maxMin) * iH;
+
+  // Smooth curve using bezier
+  const pts = sessions.map((s, i) => ({ x: toX(i), y: toY(s.totalMin) }));
+  let pathD = '';
+  if (pts.length === 1) {
+    pathD = `M${pts[0].x},${pts[0].y}`;
+  } else {
+    pathD = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+    for (let i = 1; i < pts.length; i++) {
+      const prev = pts[i-1], curr = pts[i];
+      const cpx = (prev.x + curr.x) / 2;
+      pathD += ` C${cpx.toFixed(1)},${prev.y.toFixed(1)} ${cpx.toFixed(1)},${curr.y.toFixed(1)} ${curr.x.toFixed(1)},${curr.y.toFixed(1)}`;
+    }
+  }
+
+  // Area fill
+  const areaD = pathD + ` L${pts[pts.length-1].x.toFixed(1)},${(pad.top+iH).toFixed(1)} L${pts[0].x.toFixed(1)},${(pad.top+iH).toFixed(1)} Z`;
+
+  return (
+    <div style={{ position: 'relative', userSelect: 'none' }}>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`}
+        style={{ display: 'block', touchAction: 'none' }}
+        onPointerLeave={() => setTooltip(null)}
+      >
+        <defs>
+          <linearGradient id="cardioGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6bb8ff" stopOpacity="0.3"/>
+            <stop offset="100%" stopColor="#6bb8ff" stopOpacity="0.02"/>
+          </linearGradient>
+        </defs>
+
+        {/* Grid lines */}
+        {[0.5, 1.0].map((r, i) => (
+          <g key={i}>
+            <line x1={pad.left} y1={toY(maxMin*r)} x2={W-pad.right} y2={toY(maxMin*r)}
+              stroke="#161616" strokeWidth={1}/>
+            <text x={pad.left-4} y={toY(maxMin*r)+3} fill="#2a2a2a" fontSize={7}
+              textAnchor="end" fontFamily="monospace">{Math.round(maxMin*r)}m</text>
+          </g>
+        ))}
+
+        {/* Area */}
+        <path d={areaD} fill="url(#cardioGrad)"/>
+        {/* Line */}
+        <path d={pathD} fill="none" stroke="#6bb8ff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
+
+        {/* Dots + tap targets */}
+        {pts.map((p, i) => (
+          <g key={i}>
+            <circle cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r={3.5}
+              fill="#6bb8ff" stroke="#060606" strokeWidth={1.5}/>
+            <circle cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r={14}
+              fill="transparent"
+              onPointerDown={() => setTooltip({ idx: i, x: p.x, y: p.y, session: sessions[i] })}
+              style={{ cursor: 'pointer' }}
+            />
+          </g>
+        ))}
+
+        {/* X labels — show first, last, and every other */}
+        {sessions.map((s, i) => {
+          if (sessions.length > 6 && i % 2 !== 0 && i !== sessions.length-1) return null;
+          return (
+            <text key={i} x={pts[i].x.toFixed(1)} y={H-2}
+              fill="#2a2a2a" fontSize={7} textAnchor="middle" fontFamily="monospace">
+              {s.label}
+            </text>
+          );
+        })}
+      </svg>
+
+      {/* Tooltip panel */}
+      {tooltip && (
+        <div style={{
+          position: 'absolute',
+          left: tooltip.x / 300 * 100 + '%',
+          top: 0,
+          transform: tooltip.x > 200 ? 'translateX(-110%)' : 'translateX(8px)',
+          background: '#0d0d0d',
+          border: '1px solid #6bb8ff',
+          borderRadius: 8,
+          padding: '8px 10px',
+          minWidth: 110,
+          zIndex: 10,
+          pointerEvents: 'none'
+        }}>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#6bb8ff', marginBottom: 6 }}>
+            {tooltip.session.date} · {tooltip.session.totalMin}m total
+          </div>
+          {tooltip.session.breakdown.map((b, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 3 }}>
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#666' }}>{b.name}</span>
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#e0e0e0' }}>{b.min}m</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── DASHBOARD VIEW ───────────────────────────────────────────────────────────
+
 function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
   const [showWeightPad, setShowWeightPad] = useState(false);
-  const [bwMode, setBwMode]               = useState("line");
+  const [activeDay, setActiveDay]         = useState("A");
 
   const bwEntries = data.bodyWeight || [];
   const latestBW  = bwEntries.length > 0 ? bwEntries[bwEntries.length - 1] : null;
-  const bwDelta   = bwEntries.length >= 2 ? +(bwEntries[bwEntries.length-1].kg - bwEntries[0].kg).toFixed(1) : null;
+  const bwDelta   = bwEntries.length >= 2
+    ? +(bwEntries[bwEntries.length-1].kg - bwEntries[0].kg).toFixed(1) : null;
 
   // ── Heatmap ──
   const weekStatus = Array.from({ length: 8 }, (_, i) => ({
@@ -844,56 +1028,69 @@ function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
     days: ["A","B","C"].map(d => getDayStatus(data, d, i + 1))
   }));
 
-  // ── Lift rows ──
-  // Collect all unique exercises across all days, preserving order
-  const allExercises = [];
-  for (const day of ["A","B","C"]) {
-    for (const ex of PROGRAM[day].exercises) {
-      if (!allExercises.find(e => e.name === ex.name && e.day === day)) {
-        allExercises.push({ name: ex.name, day });
-      }
-    }
-  }
-
-  const liftRows = allExercises.map(({ name, day }) => ({
-    label: name.replace("Dumbbell","DB").replace("Seated ","").replace(" Press","P.").replace("Pulldown","Pull.").replace("Triceps","Tri.").replace("Pushdown","Push.").replace("Hanging ","").replace(" Raises","R.").replace("Cable ",""),
-    dayTag: day,
-    values: Array.from({ length: 8 }, (_, i) => data[day]?.[i+1]?.exercises?.[name] ?? null)
+  // ── Radar data ──
+  // For selected day, build weeklyData
+  const radarExercises = PROGRAM[activeDay].exercises.map(ex => ({
+    name: ex.name,
+    label: ex.name
+      .replace('Dumbbell ','DB ')
+      .replace('Seated DB ','')
+      .replace(' Press','P')
+      .replace('Pulldown','Pull')
+      .replace('Triceps ','Tri ')
+      .replace('Pushdown','Push')
+      .replace('Hanging ','')
+      .replace(' Raises','R')
+      .replace('Cable ','')
+      .replace('Bicep Curl','Curl')
+      .replace('Shoulder','Sh.')
+      .slice(0, 10)
   }));
 
-  // ── Run rows ──
-  const runRows = [
-    { label: "Easy", dayTag: "A", values: Array.from({length:8},(_,i) => data["A"]?.[i+1]?.runKm ?? null) },
-    { label: "Intervals", dayTag: "B", values: Array.from({length:8},(_,i) => data["B"]?.[i+1]?.runKm ?? null) },
-    { label: "Long Easy", dayTag: "C", values: Array.from({length:8},(_,i) => data["C"]?.[i+1]?.runKm ?? null) },
-  ];
-  const totalKm = runRows.flatMap(r => r.values).filter(v => v !== null).reduce((a,b) => a+b, 0).toFixed(1);
+  const radarWeeklyData = Array.from({ length: 8 }, (_, i) => {
+    const w = i + 1;
+    const values = {};
+    PROGRAM[activeDay].exercises.forEach(ex => {
+      values[ex.name] = data[activeDay]?.[w]?.exercises?.[ex.name] ?? null;
+    });
+    return { week: w, values };
+  }).filter(wd => Object.values(wd.values).some(v => v != null));
 
-  // ── Cardio warmup rows ──
-  // Collect all unique cardio exercise names logged across all sessions
-  const cardioMap = {}; // name -> [null x8 per day] but we want per-week totals
+  // ── Cardio line sessions ──
+  const cardioSessions = [];
   for (const day of ["A","B","C"]) {
     for (let w = 1; w <= 8; w++) {
       const warmup = data[day]?.[w]?.warmup || [];
-      for (const item of warmup) {
-        if (!item.name) continue;
-        if (!cardioMap[item.name]) cardioMap[item.name] = Array(8).fill(null);
-        const mins = parseFloat(item.min) || 0;
-        if (mins > 0) {
-          cardioMap[item.name][w-1] = (cardioMap[item.name][w-1] || 0) + mins;
-        }
-      }
+      const items = warmup.filter(item => item.name && item.min > 0);
+      if (items.length === 0) continue;
+      const totalMin = items.reduce((a, b) => a + (parseFloat(b.min)||0), 0);
+      cardioSessions.push({
+        date: `W${w}${day}`,
+        label: `${day}${w}`,
+        totalMin,
+        breakdown: items.map(it => ({ name: it.name, min: parseFloat(it.min)||0 })),
+        sortKey: w * 10 + ["A","B","C"].indexOf(day)
+      });
     }
   }
-  const cardioNames = Object.keys(cardioMap);
-  const cardioRows = cardioNames.map(name => ({
-    label: name,
-    dayTag: "",
-    values: cardioMap[name]
-  }));
+  // Also include extra days cardio
+  for (const ex of (data.extraDays || [])) {
+    const items = (ex.cardio || []).filter(c => c.name && c.min);
+    if (items.length === 0) continue;
+    const totalMin = items.reduce((a,b) => a + (parseFloat(b.min)||0), 0);
+    cardioSessions.push({
+      date: ex.date,
+      label: `+${ex.week}`,
+      totalMin,
+      breakdown: items.map(it => ({ name: it.name, min: parseFloat(it.min)||0 })),
+      sortKey: ex.week * 10 + 5
+    });
+  }
+  cardioSessions.sort((a, b) => a.sortKey - b.sortKey);
 
-  // ── Body weight chart (simple SVG line) ──
-  const bwPoints = bwEntries.map((e, i) => ({ x: i, y: e.kg, label: e.date.slice(5) }));
+  const totalKm = ["A","B","C"].flatMap(d =>
+    Array.from({length:8},(_,i) => data[d]?.[i+1]?.runKm ?? null)
+  ).filter(v => v !== null).reduce((a,b) => a+b, 0).toFixed(1);
 
   const Card = ({ title, right, children }) => (
     <div style={{ background: "#090909", border: "1px solid #141414", borderRadius: 8, padding: 16, marginBottom: 16 }}>
@@ -929,7 +1126,7 @@ function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
         <div style={{ display: "grid", gridTemplateColumns: "20px repeat(8,1fr)", gap: 4, alignItems: "center" }}>
           <div/>
           {Array.from({length:8},(_,i) => (
-            <div key={i} style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: i+1===currentWeek ? "#e8ff6b" : "#2a2a2a", textAlign: "center" }}>W{i+1}</div>
+            <div key={i} style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: i+1===currentWeek?"#e8ff6b":"#2a2a2a", textAlign: "center" }}>W{i+1}</div>
           ))}
           {["A","B","C"].map((day, di) => (
             <>
@@ -939,81 +1136,80 @@ function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
                 const bg = status==="done" ? "#6abf40" : status==="partial" ? "#e8a82a" : "#141414";
                 const isCur = week === currentWeek;
                 return (
-                  <div key={week} style={{ height: 20, borderRadius: 3, background: bg, border: `1px solid ${isCur ? "#e8ff6b44" : status==="done" ? "#3a6a2a" : status==="partial" ? "#5a4a1a" : "#1e1e1e"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div key={week} style={{ height: 20, borderRadius: 3, background: bg, border: `1px solid ${isCur?"#e8ff6b44":status==="done"?"#3a6a2a":status==="partial"?"#5a4a1a":"#1e1e1e"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {status==="done" && <span style={{ fontSize: 7, color: "#1a3a1a" }}>✓</span>}
                   </div>
                 );
               })}
             </>
           ))}
-          {/* Extra days row — only show if any exist */}
           {(data.extraDays||[]).length > 0 && <>
             <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#555" }}>+</div>
             {Array.from({length:8},(_,i) => {
               const extras = (data.extraDays||[]).filter(e => e.week === i+1);
               return (
-                <div key={i} style={{ height: 20, borderRadius: 3, background: extras.length > 0 ? "#5a3a8a" : "#141414", border: `1px solid ${i+1===currentWeek ? "#e8ff6b44" : extras.length > 0 ? "#7a4aaa" : "#1e1e1e"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {extras.length > 0 && <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 7, color: "#c8a0ff" }}>{extras.length}</span>}
+                <div key={i} style={{ height: 20, borderRadius: 3, background: extras.length>0?"#5a3a8a":"#141414", border: `1px solid ${i+1===currentWeek?"#e8ff6b44":extras.length>0?"#7a4aaa":"#1e1e1e"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {extras.length>0 && <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:7, color:"#c8a0ff" }}>{extras.length}</span>}
                 </div>
               );
             })}
           </>}
         </div>
-        <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+        <div style={{ display:"flex", gap:12, marginTop:12, flexWrap:"wrap" }}>
           {[["#6abf40","Complete"],["#e8a82a","Partial"],["#141414","Pending"],...((data.extraDays||[]).length>0?[["#5a3a8a","Extra"]]:[])]
             .map(([c,l]) => (
-              <div key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <div style={{ width: 7, height: 7, borderRadius: 2, background: c }}/>
-                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333" }}>{l}</span>
+              <div key={l} style={{ display:"flex", alignItems:"center", gap:5 }}>
+                <div style={{ width:7, height:7, borderRadius:2, background:c }}/>
+                <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333" }}>{l}</span>
               </div>
             ))}
         </div>
       </Card>
 
-      {/* ── LIFTS TABLE ── */}
-      <Card title="">
-        <ProgressTable title="LIFTS" rows={liftRows} currentWeek={currentWeek} unit="kg"/>
-        <div style={{ display: "flex", gap: 14, marginTop: 4 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <div style={{ width: 7, height: 7, borderRadius: 2, background: "#e8ff6b", opacity: 0.6 }}/>
-            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333" }}>heavier</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "#4a7a4a" }}>·</div>
-            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333" }}>bodyweight</span>
-          </div>
+      {/* ── STRENGTH RADAR ── */}
+      <Card title="STRENGTH" right={
+        <div style={{ display:"flex", gap:4 }}>
+          {["A","B","C"].map(d => (
+            <button key={d} onClick={()=>setActiveDay(d)} style={{
+              background: activeDay===d ? "#e8ff6b" : "#111",
+              border: `1px solid ${activeDay===d ? "#e8ff6b" : "#1e1e1e"}`,
+              borderRadius: 5, color: activeDay===d ? "#060606" : "#555",
+              fontFamily:"'JetBrains Mono',monospace", fontSize:10,
+              padding:"3px 10px", cursor:"pointer", fontWeight: activeDay===d?700:400
+            }}>{d}</button>
+          ))}
         </div>
+      }>
+        {radarWeeklyData.length === 0
+          ? <div style={{ textAlign:"center", padding:"32px 0", fontFamily:"'JetBrains Mono',monospace", fontSize:10, color:"#222" }}>log a session to see your shape</div>
+          : <RadarChart weeklyData={radarWeeklyData} exercises={radarExercises} currentWeek={currentWeek}/>
+        }
+        <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333", textAlign:"center", marginTop:8 }}>hold any point to inspect · each ring = one week</div>
       </Card>
 
-      {/* ── RUNS TABLE ── */}
-      <Card title="">
-        <ProgressTable title="RUNS" rows={runRows} currentWeek={currentWeek} unit="km"/>
-      </Card>
-
-      {/* ── CARDIO WARMUPS TABLE — only if logged ── */}
-      {cardioRows.length > 0 && (
-        <Card title="">
-          <ProgressTable title="CARDIO WARMUP" rows={cardioRows} currentWeek={currentWeek} unit="m"/>
-          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333", marginTop: 6 }}>minutes per week</div>
+      {/* ── CARDIO LINE ── */}
+      {cardioSessions.length > 0 && (
+        <Card title="CARDIO WARMUP">
+          <CardioLine sessions={cardioSessions}/>
+          <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333", marginTop:8 }}>tap any point for breakdown</div>
         </Card>
       )}
 
       {/* ── BODY WEIGHT ── */}
       <Card title="BODY WEIGHT" right={
-        <button onClick={() => setShowWeightPad(true)} style={{ background: "#e8ff6b", border: "none", borderRadius: 5, color: "#060606", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, fontWeight: 700, padding: "4px 10px", cursor: "pointer" }}>+ LOG</button>
+        <button onClick={()=>setShowWeightPad(true)} style={{ background:"#e8ff6b", border:"none", borderRadius:5, color:"#060606", fontFamily:"'JetBrains Mono',monospace", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>+ LOG</button>
       }>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
-          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 38, fontWeight: 700, color: latestBW ? "#e8ff6b" : "#222", lineHeight: 1 }}>{latestBW ? latestBW.kg : "—"}</div>
-          {latestBW && <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 14, color: "#444" }}>kg</div>}
-          {bwDelta !== null && <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: bwDelta < 0 ? "#6abf40" : bwDelta > 0 ? "#ff6b6b" : "#444", marginLeft: 4 }}>{bwDelta > 0 ? "+" : ""}{bwDelta} kg</div>}
+        <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:14 }}>
+          <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:38, fontWeight:700, color:latestBW?"#e8ff6b":"#222", lineHeight:1 }}>{latestBW?latestBW.kg:"—"}</div>
+          {latestBW && <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:14, color:"#444" }}>kg</div>}
+          {bwDelta!==null && <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:11, color:bwDelta<0?"#6abf40":bwDelta>0?"#ff6b6b":"#444", marginLeft:4 }}>{bwDelta>0?"+":""}{bwDelta} kg</div>}
         </div>
-        {/* Simple weight history */}
         {bwEntries.length > 0 && (
-          <div style={{ maxHeight: 120, overflowY: "auto" }}>
-            {[...bwEntries].reverse().map((e, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #0f0f0f" }}>
-                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "#333" }}>{e.date}</span>
-                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: "#777" }}>{e.kg} kg</span>
+          <div style={{ maxHeight:120, overflowY:"auto" }}>
+            {[...bwEntries].reverse().map((e,i) => (
+              <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #0f0f0f" }}>
+                <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:10, color:"#333" }}>{e.date}</span>
+                <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:11, color:"#777" }}>{e.kg} kg</span>
               </div>
             ))}
           </div>
@@ -1021,31 +1217,28 @@ function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
       </Card>
 
       {/* ── BACKUP & RESTORE ── */}
-      <div style={{ paddingTop: 8, paddingBottom: 8 }}>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: "#333", letterSpacing: 3, marginBottom: 10 }}>BACKUP & RESTORE</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-          <button onClick={() => exportJSON(data)} style={{ background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: 8, color: "#888", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: 1, padding: "14px 0", cursor: "pointer" }}>
-            ↓ BACKUP JSON
-          </button>
-          <label style={{ background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: 8, color: "#888", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: 1, padding: "14px 0", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ paddingTop:8, paddingBottom:8 }}>
+        <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:9, color:"#333", letterSpacing:3, marginBottom:10 }}>BACKUP & RESTORE</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+          <button onClick={()=>exportJSON(data)} style={{ background:"#0f0f0f", border:"1px solid #1e1e1e", borderRadius:8, color:"#888", fontFamily:"'JetBrains Mono',monospace", fontSize:10, letterSpacing:1, padding:"14px 0", cursor:"pointer" }}>↓ BACKUP JSON</button>
+          <label style={{ background:"#0f0f0f", border:"1px solid #1e1e1e", borderRadius:8, color:"#888", fontFamily:"'JetBrains Mono',monospace", fontSize:10, letterSpacing:1, padding:"14px 0", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
             ↑ RESTORE JSON
-            <input type="file" accept=".json" style={{ display: "none" }} onChange={e => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              importJSON(file, parsed => { if (window.confirm("Replace all data with this backup?")) { onImport(parsed); } }, err => alert(err));
-              e.target.value = "";
+            <input type="file" accept=".json" style={{ display:"none" }} onChange={e=>{
+              const file=e.target.files?.[0]; if(!file) return;
+              importJSON(file, parsed=>{ if(window.confirm("Replace all data with this backup?")){ onImport(parsed); } }, err=>alert(err));
+              e.target.value="";
             }}/>
           </label>
         </div>
-        <button onClick={() => exportCSV(data)} style={{ width: "100%", background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: 8, color: "#444", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: 2, padding: "12px 0", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-          <span style={{ color: "#333" }}>↓</span> EXPORT CSV
+        <button onClick={()=>exportCSV(data)} style={{ width:"100%", background:"#0f0f0f", border:"1px solid #1e1e1e", borderRadius:8, color:"#444", fontFamily:"'JetBrains Mono',monospace", fontSize:10, letterSpacing:2, padding:"12px 0", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+          <span style={{ color:"#333" }}>↓</span> EXPORT CSV
         </button>
       </div>
 
       {showWeightPad && (
         <Numpad value={latestBW?.kg} label="BODY WEIGHT" unit="kg"
-          onConfirm={kg => { if (kg !== null) onLogWeight(kg); setShowWeightPad(false); }}
-          onClose={() => setShowWeightPad(false)}
+          onConfirm={kg=>{ if(kg!==null) onLogWeight(kg); setShowWeightPad(false); }}
+          onClose={()=>setShowWeightPad(false)}
         />
       )}
     </div>
