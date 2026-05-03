@@ -712,6 +712,31 @@ function LineChart({ points, width="100%", height=140, color="#e8ff6b", unit="",
   );
 }
 
+function exportJSON(data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `training_sys_backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importJSON(file, onSuccess, onError) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      // Basic sanity check
+      if (!parsed || typeof parsed !== "object") throw new Error("Invalid file");
+      onSuccess(parsed);
+    } catch {
+      onError("Could not read file. Make sure it's a TRAINING.SYS backup.");
+    }
+  };
+  reader.readAsText(file);
+}
+
 // ─── DASHBOARD VIEW ───────────────────────────────────────────────────────────
 
 function ChartToggle({ mode, onChange }) {
@@ -812,7 +837,7 @@ function Chart({ points, mode, color, unit="", height=120 }) {
   );
 }
 
-function DashboardView({ data, currentWeek, onLogWeight }) {
+function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
   const [showWeightPad, setShowWeightPad] = useState(false);
   const [selectedEx, setSelectedEx]       = useState("Dumbbell Bench Press");
   const [liftMode, setLiftMode]           = useState("bar");
@@ -1019,10 +1044,32 @@ function DashboardView({ data, currentWeek, onLogWeight }) {
         )}
       </Card>
 
-      {/* ── EXPORT ── */}
+      {/* ── EXPORT / IMPORT ── */}
       <div style={{paddingTop:8,paddingBottom:8}}>
-        <button onClick={()=>exportCSV(data)} style={{width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",fontSize:10,letterSpacing:2,padding:"14px 0",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-          <span style={{color:"#333"}}>↓</span> EXPORT DATA AS CSV
+        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#333",letterSpacing:3,marginBottom:10}}>BACKUP & RESTORE</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          <button onClick={()=>exportJSON(data)} style={{background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,color:"#888",fontFamily:"'JetBrains Mono',monospace",fontSize:10,letterSpacing:1,padding:"14px 0",cursor:"pointer"}}>
+            ↓ BACKUP JSON
+          </button>
+          <label style={{background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,color:"#888",fontFamily:"'JetBrains Mono',monospace",fontSize:10,letterSpacing:1,padding:"14px 0",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            ↑ RESTORE JSON
+            <input type="file" accept=".json" style={{display:"none"}} onChange={e=>{
+              const file=e.target.files?.[0];
+              if(!file) return;
+              importJSON(file,
+                (parsed)=>{
+                  if(window.confirm("Replace all data with this backup?")) {
+                    onImport(parsed);
+                  }
+                },
+                (err)=>alert(err)
+              );
+              e.target.value="";
+            }}/>
+          </label>
+        </div>
+        <button onClick={()=>exportCSV(data)} style={{width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",fontSize:10,letterSpacing:2,padding:"12px 0",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          <span style={{color:"#333"}}>↓</span> EXPORT CSV
         </button>
       </div>
 
@@ -1187,6 +1234,11 @@ export default function App() {
     else d.bodyWeight.push({date:t,kg});
   });
 
+  const handleImport = (parsed) => {
+    setData(parsed);
+    saveData(parsed);
+  };
+
   const handleAddWarmup = (day,week) => mutate(d=>{
     if(!d[day][week].warmup) d[day][week].warmup=[];
     d[day][week].warmup.push({id:Date.now(),name:"",min:null});
@@ -1276,6 +1328,7 @@ export default function App() {
           :<DashboardView
               data={data} currentWeek={activeWeek}
               onLogWeight={handleLogWeight}
+              onImport={handleImport}
             />
         }
       </div>
