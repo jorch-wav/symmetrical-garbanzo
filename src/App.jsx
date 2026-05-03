@@ -410,7 +410,7 @@ function WarmupModal({ onConfirm, onClose }) {
             value={name}
             onChange={e=>setName(e.target.value)}
             placeholder="exercise"
-            style={{flex:1,background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,color:"#e8ff6b",fontFamily:"'JetBrains Mono',monospace",fontSize:15,padding:"11px 12px",outline:"none"}}
+            style={{flex:1,background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,color:"#e8ff6b",fontFamily:"'JetBrains Mono',monospace",fontSize:16,padding:"11px 12px",outline:"none"}}
           />
           <div style={{display:"flex",alignItems:"center",gap:4,background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,padding:"0 12px"}}>
             <input
@@ -418,7 +418,7 @@ function WarmupModal({ onConfirm, onClose }) {
               onChange={e=>setMins(e.target.value.replace(/[^0-9]/g,""))}
               placeholder="min"
               inputMode="numeric"
-              style={{width:42,background:"none",border:"none",color:"#6bb8ff",fontFamily:"'JetBrains Mono',monospace",fontSize:15,outline:"none",textAlign:"center"}}
+              style={{width:42,background:"none",border:"none",color:"#6bb8ff",fontFamily:"'JetBrains Mono',monospace",fontSize:16,outline:"none",textAlign:"center"}}
             />
             <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#444"}}>m</span>
           </div>
