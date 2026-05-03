@@ -739,344 +739,313 @@ function importJSON(file, onSuccess, onError) {
 
 // ─── DASHBOARD VIEW ───────────────────────────────────────────────────────────
 
-function ChartToggle({ mode, onChange }) {
-  return (
-    <div style={{display:"flex",gap:3}}>
-      {[["bar","▬"],["line","╱"],["dot","•"]].map(([m,icon])=>(
-        <button key={m} onClick={()=>onChange(m)} style={{
-          background:mode===m?"#e8ff6b":"#111",
-          border:`1px solid ${mode===m?"#e8ff6b":"#1e1e1e"}`,
-          borderRadius:4,color:mode===m?"#060606":"#444",
-          fontFamily:"'JetBrains Mono',monospace",fontSize:11,
-          padding:"3px 8px",cursor:"pointer",lineHeight:1
-        }}>{icon}</button>
-      ))}
-    </div>
-  );
+// ─── PROGRESS TABLE ──────────────────────────────────────────────────────────
+
+function cellColor(val, min, max) {
+  if (val === null || val === undefined) return { bg: "transparent", text: "#222", border: "#111" };
+  if (val === 0) return { bg: "#1a2a1a", text: "#4a7a4a", border: "#2a3a2a" }; // BW
+  if (min === max) return { bg: "#2a3a10", text: "#e8ff6b", border: "#3a5a18" };
+  const t = (val - min) / (max - min);
+  // dark green → yellow gradient
+  const r = Math.round(80 + t * 152);
+  const g = Math.round(140 + t * 115);
+  const b = Math.round(20 + t * 87);
+  const textBright = t > 0.4;
+  return {
+    bg: `rgba(${r},${g},${b},${0.15 + t * 0.25})`,
+    text: textBright ? "#e8ff6b" : "#6a9a30",
+    border: `rgba(${r},${g},${b},0.3)`
+  };
 }
 
-function Chart({ points, mode, color, unit="", height=120 }) {
-  // points: [{x, y, label}] — nulls already filtered out by caller
-  const valid = points.filter(p=>p&&p.y!=null);
-
-  if (valid.length === 0) return (
-    <div style={{height:40,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#222"}}>no data yet</span>
-    </div>
-  );
-
-  const maxY = Math.max(...valid.map(p=>p.y));
-  const minY = Math.min(...valid.map(p=>p.y));
-  const rangeY = maxY - minY || 1;
-
-  // ── BAR ──
-  if (mode === "bar") {
-    return (
-      <div style={{width:"100%"}}>
-        <div style={{display:"flex",alignItems:"flex-end",gap:4,height}}>
-          {points.map((p,i)=>{
-            const empty = !p || p.y==null;
-            const pct = empty ? 0 : p.y / maxY;
-            return (
-              <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%",gap:3}}>
-                {!empty&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color,whiteSpace:"nowrap"}}>{p.y}{unit}</div>}
-                <div style={{
-                  width:"100%",borderRadius:"3px 3px 0 0",
-                  height:empty?2:`${Math.max(3,pct*100)}%`,
-                  background:empty?"#141414":color,opacity:empty?0.3:1,
-                  transition:"height 0.4s ease"
-                }}/>
-              </div>
-            );
-          })}
-        </div>
-        <div style={{display:"flex",gap:4,marginTop:5}}>
-          {points.map((p,i)=>(
-            <div key={i} style={{flex:1,textAlign:"center",fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#2a2a2a"}}>{p?.label||`W${i+1}`}</div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // ── LINE & DOT — SVG ──
-  const W=300, H=height, pad={top:14,right:24,bottom:20,left:28};
-  const iW=W-pad.left-pad.right, iH=H-pad.top-pad.bottom;
-  const toX=(i)=>pad.left+(i/(points.length-1||1))*iW;
-  const toY=(v)=>pad.top+(1-(v-minY)/rangeY)*iH;
-
-  const svgValid = valid.map(p=>({...p, sx:toX(points.indexOf(p)), sy:toY(p.y)}));
-  const pathD = svgValid.map((p,i)=>`${i===0?"M":"L"}${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(" ");
-
-  // y-axis ticks
-  const ticks = minY===maxY ? [minY] : [minY, maxY];
+function ProgressTable({ title, rows, weeks = 8, currentWeek, unit = "" }) {
+  // rows: [{ label, dayTag, values: [v1..v8] }]
+  const cols = Array.from({ length: weeks }, (_, i) => i + 1);
 
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:"visible",display:"block"}}>
-      {ticks.map((t,i)=>(
-        <g key={i}>
-          <line x1={pad.left} y1={toY(t)} x2={W-pad.right} y2={toY(t)} stroke="#1a1a1a" strokeWidth={1}/>
-          <text x={pad.left-4} y={toY(t)+4} fill="#333" fontSize={8} textAnchor="end" fontFamily="monospace">
-            {Number.isInteger(t)?t:t.toFixed(1)}
-          </text>
-        </g>
-      ))}
-      {mode==="line"&&<path d={pathD} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>}
-      {svgValid.map((p,i)=>(
-        <g key={i}>
-          <circle cx={p.sx} cy={p.sy} r={mode==="dot"?4:3} fill={color}/>
-          {(i===svgValid.length-1||mode==="dot")&&(
-            <text x={p.sx} y={p.sy-7} fill={color} fontSize={8} textAnchor="middle" fontFamily="monospace">{p.y}{unit}</text>
-          )}
-        </g>
-      ))}
-      {points.map((p,i)=>(
-        <text key={i} x={toX(i)} y={H} fill="#2a2a2a" fontSize={8} textAnchor="middle" fontFamily="monospace">{p?.label||`W${i+1}`}</text>
-      ))}
-    </svg>
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: "#444", letterSpacing: 3, marginBottom: 12 }}>{title}</div>
+      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 320 }}>
+          <thead>
+            <tr>
+              <th style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333", textAlign: "left", padding: "0 6px 8px 0", minWidth: 90, fontWeight: 400 }}></th>
+              {cols.map(w => (
+                <th key={w} style={{
+                  fontFamily: "'JetBrains Mono',monospace", fontSize: 8,
+                  color: w === currentWeek ? "#e8ff6b" : "#333",
+                  fontWeight: w === currentWeek ? 700 : 400,
+                  padding: "0 2px 8px", textAlign: "center", minWidth: 36
+                }}>W{w}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, ri) => {
+              const filled = row.values.filter(v => v !== null && v !== undefined && v !== 0);
+              const min = filled.length ? Math.min(...filled) : 0;
+              const max = filled.length ? Math.max(...filled) : 0;
+              return (
+                <tr key={ri}>
+                  <td style={{
+                    fontFamily: "'JetBrains Mono',monospace", fontSize: 9,
+                    color: "#555", padding: "3px 8px 3px 0",
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 90
+                  }}>
+                    {row.dayTag && <span style={{ color: "#333", marginRight: 4 }}>{row.dayTag}</span>}
+                    {row.label}
+                  </td>
+                  {cols.map(w => {
+                    const val = row.values[w - 1];
+                    const hasVal = val !== null && val !== undefined;
+                    const c = cellColor(val, min, max);
+                    const display = !hasVal ? "" : val === 0 ? "·" : `${val}${unit}`;
+                    return (
+                      <td key={w} style={{
+                        padding: "3px 2px",
+                        textAlign: "center"
+                      }}>
+                        <div style={{
+                          background: hasVal ? c.bg : "transparent",
+                          border: `1px solid ${hasVal ? c.border : "#111"}`,
+                          borderRadius: 4,
+                          padding: "4px 2px",
+                          fontFamily: "'JetBrains Mono',monospace",
+                          fontSize: val === 0 ? 14 : 9,
+                          color: hasVal ? c.text : "#1a1a1a",
+                          minHeight: 24,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontWeight: w === currentWeek ? 700 : 400
+                        }}>{display}</div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
 function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
   const [showWeightPad, setShowWeightPad] = useState(false);
-  const [selectedEx, setSelectedEx]       = useState("Dumbbell Bench Press");
-  const [liftMode, setLiftMode]           = useState("bar");
-  const [runMode, setRunMode]             = useState("bar");
   const [bwMode, setBwMode]               = useState("line");
 
-  const allEx = [...new Set(["A","B","C"].flatMap(d=>PROGRAM[d].exercises.map(e=>e.name)))];
   const bwEntries = data.bodyWeight || [];
-  const latestBW  = bwEntries.length>0 ? bwEntries[bwEntries.length-1] : null;
+  const latestBW  = bwEntries.length > 0 ? bwEntries[bwEntries.length - 1] : null;
+  const bwDelta   = bwEntries.length >= 2 ? +(bwEntries[bwEntries.length-1].kg - bwEntries[0].kg).toFixed(1) : null;
 
-  // Heatmap
-  const weekStatus = Array.from({length:8},(_,i)=>({
-    week:i+1,
-    days:["A","B","C"].map(d=>getDayStatus(data,d,i+1))
+  // ── Heatmap ──
+  const weekStatus = Array.from({ length: 8 }, (_, i) => ({
+    week: i + 1,
+    days: ["A","B","C"].map(d => getDayStatus(data, d, i + 1))
   }));
 
-  // Lift data — average across days per week for selected exercise
-  const liftPoints = Array.from({length:8},(_,i)=>{
-    const w=i+1;
-    const vals=["A","B","C"].map(d=>{
-      if(!PROGRAM[d].exercises.find(e=>e.name===selectedEx)) return null;
-      return data[d]?.[w]?.exercises?.[selectedEx]??null;
-    }).filter(v=>v!==null);
-    if(vals.length===0) return null;
-    return {x:i,y:+( vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1),label:`W${w}`};
-  });
+  // ── Lift rows ──
+  // Collect all unique exercises across all days, preserving order
+  const allExercises = [];
+  for (const day of ["A","B","C"]) {
+    for (const ex of PROGRAM[day].exercises) {
+      if (!allExercises.find(e => e.name === ex.name && e.day === day)) {
+        allExercises.push({ name: ex.name, day });
+      }
+    }
+  }
 
-  // Per-day lift points
-  const liftByDay = ["A","B","C"].map(day=>{
-    if(!PROGRAM[day].exercises.find(e=>e.name===selectedEx)) return null;
-    return {
-      day,
-      color:day==="A"?"#e8ff6b":day==="B"?"#6abf40":"#6bb8ff",
-      points:Array.from({length:8},(_,i)=>{
-        const v=data[day]?.[i+1]?.exercises?.[selectedEx]??null;
-        return v!==null?{x:i,y:v,label:`W${i+1}`}:null;
-      })
-    };
-  }).filter(Boolean);
-
-  // Run data — total km per week
-  const runPoints = Array.from({length:8},(_,i)=>{
-    const w=i+1;
-    const vals=["A","B","C"].map(d=>data[d]?.[w]?.runKm??null).filter(v=>v!==null);
-    if(vals.length===0) return null;
-    return {x:i,y:+vals.reduce((a,b)=>a+b,0).toFixed(2),label:`W${w}`};
-  });
-
-  // Run per day
-  const runByDay=[{day:"A",label:"EASY",color:"#e8ff6b"},{day:"B",label:"INTERVALS",color:"#6abf40"},{day:"C",label:"LONG EASY",color:"#6bb8ff"}].map(({day,label,color})=>({
-    day,label,color,
-    points:Array.from({length:8},(_,i)=>{
-      const v=data[day]?.[i+1]?.runKm??null;
-      return v!==null?{x:i,y:v,label:`W${i+1}`}:null;
-    })
+  const liftRows = allExercises.map(({ name, day }) => ({
+    label: name.replace("Dumbbell","DB").replace("Seated ","").replace(" Press","P.").replace("Pulldown","Pull.").replace("Triceps","Tri.").replace("Pushdown","Push.").replace("Hanging ","").replace(" Raises","R.").replace("Cable ",""),
+    dayTag: day,
+    values: Array.from({ length: 8 }, (_, i) => data[day]?.[i+1]?.exercises?.[name] ?? null)
   }));
 
-  // BW points
-  const bwPoints = bwEntries.map((e,i)=>({x:i,y:e.kg,label:e.date.slice(5)}));
-  const bwDelta  = bwEntries.length>=2 ? +(bwEntries[bwEntries.length-1].kg-bwEntries[0].kg).toFixed(1) : null;
-  const totalKm  = ["A","B","C"].flatMap(d=>Array.from({length:8},(_,i)=>data[d]?.[i+1]?.runKm??null)).filter(v=>v!==null).reduce((a,b)=>a+b,0).toFixed(1);
+  // ── Run rows ──
+  const runRows = [
+    { label: "Easy", dayTag: "A", values: Array.from({length:8},(_,i) => data["A"]?.[i+1]?.runKm ?? null) },
+    { label: "Intervals", dayTag: "B", values: Array.from({length:8},(_,i) => data["B"]?.[i+1]?.runKm ?? null) },
+    { label: "Long Easy", dayTag: "C", values: Array.from({length:8},(_,i) => data["C"]?.[i+1]?.runKm ?? null) },
+  ];
+  const totalKm = runRows.flatMap(r => r.values).filter(v => v !== null).reduce((a,b) => a+b, 0).toFixed(1);
 
-  const S = (label,val,sub,color="#e8ff6b") => (
-    <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:"12px 10px",textAlign:"center"}}>
-      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#444",letterSpacing:2,marginBottom:5}}>{label}</div>
-      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:24,fontWeight:700,color,lineHeight:1}}>{val}</div>
-      {sub&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#444",marginTop:4}}>{sub}</div>}
-    </div>
-  );
+  // ── Cardio warmup rows ──
+  // Collect all unique cardio exercise names logged across all sessions
+  const cardioMap = {}; // name -> [null x8 per day] but we want per-week totals
+  for (const day of ["A","B","C"]) {
+    for (let w = 1; w <= 8; w++) {
+      const warmup = data[day]?.[w]?.warmup || [];
+      for (const item of warmup) {
+        if (!item.name) continue;
+        if (!cardioMap[item.name]) cardioMap[item.name] = Array(8).fill(null);
+        const mins = parseFloat(item.min) || 0;
+        if (mins > 0) {
+          cardioMap[item.name][w-1] = (cardioMap[item.name][w-1] || 0) + mins;
+        }
+      }
+    }
+  }
+  const cardioNames = Object.keys(cardioMap);
+  const cardioRows = cardioNames.map(name => ({
+    label: name,
+    dayTag: "",
+    values: cardioMap[name]
+  }));
 
-  const Card = ({title,right,children}) => (
-    <div style={{background:"#090909",border:"1px solid #141414",borderRadius:8,padding:16,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#444",letterSpacing:3}}>{title}</div>
-        {right}
-      </div>
+  // ── Body weight chart (simple SVG line) ──
+  const bwPoints = bwEntries.map((e, i) => ({ x: i, y: e.kg, label: e.date.slice(5) }));
+
+  const Card = ({ title, right, children }) => (
+    <div style={{ background: "#090909", border: "1px solid #141414", borderRadius: 8, padding: 16, marginBottom: 16 }}>
+      {(title || right) && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: "#444", letterSpacing: 3 }}>{title}</div>
+          {right}
+        </div>
+      )}
       {children}
     </div>
   );
 
   return (
     <div>
+
       {/* ── SUMMARY STATS ── */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:20}}>
-        {S("WEEK",`${currentWeek}/8`)}
-        {S("KM RAN",`${totalKm}`,"total","#6bb8ff")}
-        {S("WEIGHT",latestBW?`${latestBW.kg}`:"—","kg",latestBW?"#e8ff6b":"#333")}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
+        {[
+          ["WEEK", `${currentWeek}/8`, "#e8ff6b"],
+          ["KM RAN", totalKm, "#6bb8ff"],
+          ["WEIGHT", latestBW ? `${latestBW.kg}` : "—", latestBW ? "#e8ff6b" : "#333"],
+        ].map(([label, val, color]) => (
+          <div key={label} style={{ background: "#090909", border: "1px solid #141414", borderRadius: 8, padding: "12px 8px", textAlign: "center" }}>
+            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#444", letterSpacing: 2, marginBottom: 5 }}>{label}</div>
+            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 22, fontWeight: 700, color, lineHeight: 1 }}>{val}</div>
+          </div>
+        ))}
       </div>
 
       {/* ── HEATMAP ── */}
       <Card title="8-WEEK HEATMAP">
-        <div style={{display:"grid",gridTemplateColumns:"20px repeat(8,1fr)",gap:4,alignItems:"center"}}>
+        <div style={{ display: "grid", gridTemplateColumns: "20px repeat(8,1fr)", gap: 4, alignItems: "center" }}>
           <div/>
-          {Array.from({length:8},(_,i)=>(
-            <div key={i} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:i+1===currentWeek?"#e8ff6b":"#2a2a2a",textAlign:"center"}}>W{i+1}</div>
+          {Array.from({length:8},(_,i) => (
+            <div key={i} style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: i+1===currentWeek ? "#e8ff6b" : "#2a2a2a", textAlign: "center" }}>W{i+1}</div>
           ))}
-          {["A","B","C"].map((day,di)=>(
-            <>{/* fragment key workaround */}
-              <div key={`l${di}`} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333"}}>D{day}</div>
-              {weekStatus.map(({week,days})=>{
-                const status=days[di];
-                const bg=status==="done"?"#6abf40":status==="partial"?"#e8a82a":"#141414";
-                const isCur=week===currentWeek;
+          {["A","B","C"].map((day, di) => (
+            <>
+              <div key={`l${di}`} style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333" }}>D{day}</div>
+              {weekStatus.map(({ week, days }) => {
+                const status = days[di];
+                const bg = status==="done" ? "#6abf40" : status==="partial" ? "#e8a82a" : "#141414";
+                const isCur = week === currentWeek;
                 return (
-                  <div key={week} style={{height:20,borderRadius:3,background:bg,border:`1px solid ${isCur?"#e8ff6b44":status==="done"?"#3a6a2a":status==="partial"?"#5a4a1a":"#1e1e1e"}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    {status==="done"&&<span style={{fontSize:7,color:"#1a3a1a"}}>✓</span>}
+                  <div key={week} style={{ height: 20, borderRadius: 3, background: bg, border: `1px solid ${isCur ? "#e8ff6b44" : status==="done" ? "#3a6a2a" : status==="partial" ? "#5a4a1a" : "#1e1e1e"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {status==="done" && <span style={{ fontSize: 7, color: "#1a3a1a" }}>✓</span>}
                   </div>
                 );
               })}
             </>
           ))}
-          {/* Extra days row */}
-          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#555"}}>+</div>
-          {Array.from({length:8},(_,i)=>{
-            const w=i+1;
-            const extras=(data.extraDays||[]).filter(e=>e.week===w);
-            return (
-              <div key={w} style={{height:20,borderRadius:3,background:extras.length>0?"#5a3a8a":"#141414",border:`1px solid ${w===currentWeek?"#e8ff6b44":extras.length>0?"#7a4aaa":"#1e1e1e"}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                {extras.length>0&&<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:7,color:"#c8a0ff"}}>{extras.length}</span>}
-              </div>
-            );
-          })}
+          {/* Extra days row — only show if any exist */}
+          {(data.extraDays||[]).length > 0 && <>
+            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#555" }}>+</div>
+            {Array.from({length:8},(_,i) => {
+              const extras = (data.extraDays||[]).filter(e => e.week === i+1);
+              return (
+                <div key={i} style={{ height: 20, borderRadius: 3, background: extras.length > 0 ? "#5a3a8a" : "#141414", border: `1px solid ${i+1===currentWeek ? "#e8ff6b44" : extras.length > 0 ? "#7a4aaa" : "#1e1e1e"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {extras.length > 0 && <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 7, color: "#c8a0ff" }}>{extras.length}</span>}
+                </div>
+              );
+            })}
+          </>}
         </div>
-        <div style={{display:"flex",gap:14,marginTop:12,flexWrap:"wrap"}}>
-          {[["#6abf40","Complete"],["#e8a82a","Partial"],["#141414","Pending"],["#5a3a8a","Extra day"]].map(([c,l])=>(
-            <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
-              <div style={{width:7,height:7,borderRadius:2,background:c}}/>
-              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333"}}>{l}</span>
-            </div>
-          ))}
+        <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+          {[["#6abf40","Complete"],["#e8a82a","Partial"],["#141414","Pending"],...((data.extraDays||[]).length>0?[["#5a3a8a","Extra"]]:[])]
+            .map(([c,l]) => (
+              <div key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <div style={{ width: 7, height: 7, borderRadius: 2, background: c }}/>
+                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333" }}>{l}</span>
+              </div>
+            ))}
         </div>
       </Card>
 
-      {/* ── LIFTS ── */}
-      <Card title="LIFT PROGRESSION" right={<ChartToggle mode={liftMode} onChange={setLiftMode}/>}>
-        <select value={selectedEx} onChange={e=>setSelectedEx(e.target.value)} style={{width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",color:"#e0e0e0",fontFamily:"'JetBrains Mono',monospace",fontSize:11,padding:"8px 10px",borderRadius:6,marginBottom:16,outline:"none"}}>
-          {allEx.map(e=><option key={e} value={e}>{e}</option>)}
-        </select>
-        {/* Combined avg across days */}
-        <div style={{marginBottom:16}}>
-          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333",letterSpacing:2,marginBottom:10}}>AVG ACROSS DAYS</div>
-          <Chart points={liftPoints} mode={liftMode} color="#e8ff6b" unit="kg" height={110}/>
+      {/* ── LIFTS TABLE ── */}
+      <Card title="">
+        <ProgressTable title="LIFTS" rows={liftRows} currentWeek={currentWeek} unit="kg"/>
+        <div style={{ display: "flex", gap: 14, marginTop: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ width: 7, height: 7, borderRadius: 2, background: "#e8ff6b", opacity: 0.6 }}/>
+            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333" }}>heavier</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "#4a7a4a" }}>·</div>
+            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333" }}>bodyweight</span>
+          </div>
         </div>
-        {/* Per day breakdown */}
-        {liftByDay.map(({day,color,points})=>{
-          const valid=points.filter(p=>p&&p.y!=null);
-          if(valid.length===0) return null;
-          const delta=valid.length>=2?+(valid[valid.length-1].y-valid[0].y).toFixed(1):null;
-          return (
-            <div key={day} style={{borderTop:"1px solid #111",paddingTop:12,marginTop:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333",letterSpacing:2}}>DAY {day}</span>
-                {delta!==null&&<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:delta>0?"#6abf40":delta<0?"#ff6b6b":"#444"}}>{delta>0?"+":""}{delta}kg</span>}
-              </div>
-              <Chart points={points} mode={liftMode} color={color} unit="kg" height={90}/>
-            </div>
-          );
-        })}
       </Card>
 
-      {/* ── RUNS ── */}
-      <Card title="RUN DISTANCES" right={<ChartToggle mode={runMode} onChange={setRunMode}/>}>
-        <div style={{marginBottom:16}}>
-          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333",letterSpacing:2,marginBottom:10}}>TOTAL KM PER WEEK</div>
-          <Chart points={runPoints} mode={runMode} color="#6bb8ff" unit="km" height={110}/>
-        </div>
-        {runByDay.map(({day,label,color,points})=>{
-          const valid=points.filter(p=>p&&p.y!=null);
-          if(valid.length===0) return null;
-          return (
-            <div key={day} style={{borderTop:"1px solid #111",paddingTop:12,marginTop:12}}>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333",letterSpacing:2,marginBottom:10}}>DAY {day} — {label}</div>
-              <Chart points={points} mode={runMode} color={color} unit="km" height={90}/>
-            </div>
-          );
-        })}
+      {/* ── RUNS TABLE ── */}
+      <Card title="">
+        <ProgressTable title="RUNS" rows={runRows} currentWeek={currentWeek} unit="km"/>
       </Card>
+
+      {/* ── CARDIO WARMUPS TABLE — only if logged ── */}
+      {cardioRows.length > 0 && (
+        <Card title="">
+          <ProgressTable title="CARDIO WARMUP" rows={cardioRows} currentWeek={currentWeek} unit="m"/>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: "#333", marginTop: 6 }}>minutes per week</div>
+        </Card>
+      )}
 
       {/* ── BODY WEIGHT ── */}
       <Card title="BODY WEIGHT" right={
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <ChartToggle mode={bwMode} onChange={setBwMode}/>
-          <button onClick={()=>setShowWeightPad(true)} style={{background:"#e8ff6b",border:"none",borderRadius:5,color:"#060606",fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:700,padding:"4px 10px",cursor:"pointer"}}>+ LOG</button>
-        </div>
+        <button onClick={() => setShowWeightPad(true)} style={{ background: "#e8ff6b", border: "none", borderRadius: 5, color: "#060606", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, fontWeight: 700, padding: "4px 10px", cursor: "pointer" }}>+ LOG</button>
       }>
-        <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:16}}>
-          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:40,fontWeight:700,color:latestBW?"#e8ff6b":"#222",lineHeight:1}}>{latestBW?latestBW.kg:"—"}</div>
-          {latestBW&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,color:"#444"}}>kg</div>}
-          {bwDelta!==null&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:bwDelta<0?"#6abf40":bwDelta>0?"#ff6b6b":"#444",marginLeft:4}}>{bwDelta>0?"+":""}{bwDelta} kg</div>}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 38, fontWeight: 700, color: latestBW ? "#e8ff6b" : "#222", lineHeight: 1 }}>{latestBW ? latestBW.kg : "—"}</div>
+          {latestBW && <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 14, color: "#444" }}>kg</div>}
+          {bwDelta !== null && <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: bwDelta < 0 ? "#6abf40" : bwDelta > 0 ? "#ff6b6b" : "#444", marginLeft: 4 }}>{bwDelta > 0 ? "+" : ""}{bwDelta} kg</div>}
         </div>
-        <Chart
-          points={bwPoints}
-          mode={bwMode} color="#e8ff6b" unit="kg" height={120}
-        />
-        {bwEntries.length>0&&(
-          <div style={{marginTop:14,maxHeight:120,overflowY:"auto"}}>
-            {[...bwEntries].reverse().map((e,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #0f0f0f"}}>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#333"}}>{e.date}</span>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"#777"}}>{e.kg} kg</span>
+        {/* Simple weight history */}
+        {bwEntries.length > 0 && (
+          <div style={{ maxHeight: 120, overflowY: "auto" }}>
+            {[...bwEntries].reverse().map((e, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #0f0f0f" }}>
+                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "#333" }}>{e.date}</span>
+                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: "#777" }}>{e.kg} kg</span>
               </div>
             ))}
           </div>
         )}
       </Card>
 
-      {/* ── EXPORT / IMPORT ── */}
-      <div style={{paddingTop:8,paddingBottom:8}}>
-        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#333",letterSpacing:3,marginBottom:10}}>BACKUP & RESTORE</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-          <button onClick={()=>exportJSON(data)} style={{background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,color:"#888",fontFamily:"'JetBrains Mono',monospace",fontSize:10,letterSpacing:1,padding:"14px 0",cursor:"pointer"}}>
+      {/* ── BACKUP & RESTORE ── */}
+      <div style={{ paddingTop: 8, paddingBottom: 8 }}>
+        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: "#333", letterSpacing: 3, marginBottom: 10 }}>BACKUP & RESTORE</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+          <button onClick={() => exportJSON(data)} style={{ background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: 8, color: "#888", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: 1, padding: "14px 0", cursor: "pointer" }}>
             ↓ BACKUP JSON
           </button>
-          <label style={{background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,color:"#888",fontFamily:"'JetBrains Mono',monospace",fontSize:10,letterSpacing:1,padding:"14px 0",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <label style={{ background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: 8, color: "#888", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: 1, padding: "14px 0", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             ↑ RESTORE JSON
-            <input type="file" accept=".json" style={{display:"none"}} onChange={e=>{
-              const file=e.target.files?.[0];
-              if(!file) return;
-              importJSON(file,
-                (parsed)=>{
-                  if(window.confirm("Replace all data with this backup?")) {
-                    onImport(parsed);
-                  }
-                },
-                (err)=>alert(err)
-              );
-              e.target.value="";
+            <input type="file" accept=".json" style={{ display: "none" }} onChange={e => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              importJSON(file, parsed => { if (window.confirm("Replace all data with this backup?")) { onImport(parsed); } }, err => alert(err));
+              e.target.value = "";
             }}/>
           </label>
         </div>
-        <button onClick={()=>exportCSV(data)} style={{width:"100%",background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",fontSize:10,letterSpacing:2,padding:"12px 0",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-          <span style={{color:"#333"}}>↓</span> EXPORT CSV
+        <button onClick={() => exportCSV(data)} style={{ width: "100%", background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: 8, color: "#444", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: 2, padding: "12px 0", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <span style={{ color: "#333" }}>↓</span> EXPORT CSV
         </button>
       </div>
 
-      {showWeightPad&&(
+      {showWeightPad && (
         <Numpad value={latestBW?.kg} label="BODY WEIGHT" unit="kg"
-          onConfirm={kg=>{ if(kg!==null) onLogWeight(kg); setShowWeightPad(false); }}
-          onClose={()=>setShowWeightPad(false)}
+          onConfirm={kg => { if (kg !== null) onLogWeight(kg); setShowWeightPad(false); }}
+          onClose={() => setShowWeightPad(false)}
         />
       )}
     </div>
