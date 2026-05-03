@@ -1139,22 +1139,29 @@ export default function App() {
 
   // Load from IndexedDB on mount (with localStorage fallback)
   useEffect(() => {
-    idbGet("wt_v4").then(saved => {
+    Promise.all([idbGet("wt_v4"), idbGet("wt_session")]).then(([saved, session]) => {
       if (saved) {
         setData(saved);
       } else {
-        // Try localStorage migration
         try {
           const ls = localStorage.getItem("wt_v4");
           if (ls) { const parsed = JSON.parse(ls); setData(parsed); }
         } catch {}
       }
+      // Restore last active day/week
+      if (session?.day) setActiveDay(session.day);
+      if (session?.week) setActiveWeek(session.week);
       setLoaded(true);
     });
   }, []);
 
-  // Save on every data change (after initial load)
+  // Save data on every change (after initial load)
   useEffect(() => { if (loaded) saveData(data); }, [data, loaded]);
+
+  // Persist last active session whenever it changes
+  useEffect(() => {
+    if (loaded) idbSet("wt_session", { day: activeDay, week: activeWeek });
+  }, [activeDay, activeWeek, loaded]);
 
   const mutate = (fn) => setData(prev=>{ const next=JSON.parse(JSON.stringify(prev)); fn(next); return next; });
 
