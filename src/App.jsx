@@ -123,13 +123,14 @@ const PROGRAM = {
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
 
 function freshData() {
-  const d = { bodyWeight: [] }; // [{date, kg}]
+  const d = { bodyWeight: [], extraDays: [] }; // extraDays: [{id, date, week, note, cardio:[{name,min}]}]
   for (const day of ["A","B","C"]) {
     d[day] = {};
     for (let w = 1; w <= 8; w++) {
       d[day][w] = {
         exercises: {},   // { exName: kg|null }
-        runKm: null,     // distance logged after run
+        warmup: [],      // [{id, name, min}]
+        runKm: null,
         done: false,
       };
       for (const ex of PROGRAM[day].exercises) {
@@ -348,15 +349,47 @@ function Sparkline({ values, color="#e8ff6b" }) {
   return <svg width={w} height={h} style={{overflow:"visible"}}><polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round"/><circle cx={(f.length-1)/(f.length-1)*w} cy={h-((f[f.length-1]-mn)/rng)*h} r={3} fill={color}/></svg>;
 }
 
+// ─── WARMUP NAME INPUT ───────────────────────────────────────────────────────
+
+function WarmupNameInput({ value, onConfirm, onClose }) {
+  const [val, setVal] = useState(value || "");
+  const suggestions = ["Rowing machine","Skip rope","Cycling","Assault bike","Stair climber","Elliptical","Swimming"];
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",zIndex:300,backdropFilter:"blur(6px)"}} onClick={onClose}>
+      <div style={{width:"100%",maxWidth:400,background:"#0d0d0d",borderTop:"1px solid #2a2a2a",padding:"16px 16px 36px",borderRadius:"16px 16px 0 0"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#555",letterSpacing:3,textAlign:"center",marginBottom:10}}>EXERCISE NAME</div>
+        <input
+          autoFocus
+          value={val}
+          onChange={e=>setVal(e.target.value)}
+          placeholder="e.g. Rowing machine"
+          style={{width:"100%",background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,color:"#e8ff6b",fontFamily:"'JetBrains Mono',monospace",fontSize:18,padding:"12px 14px",outline:"none",boxSizing:"border-box",marginBottom:14}}
+        />
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+          {suggestions.map(s=>(
+            <button key={s} onClick={()=>setVal(s)} style={{background:val===s?"#e8ff6b":"#141414",border:`1px solid ${val===s?"#e8ff6b":"#222"}`,borderRadius:20,color:val===s?"#0d0d0d":"#666",fontFamily:"'JetBrains Mono',monospace",fontSize:10,padding:"5px 10px",cursor:"pointer"}}>{s}</button>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <button onClick={onClose} style={{background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",fontSize:14,padding:"14px 0",cursor:"pointer"}}>CANCEL</button>
+          <button onClick={()=>onConfirm(val.trim()||"Exercise")} style={{background:"#e8ff6b",border:"none",borderRadius:8,color:"#0d0d0d",fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700,padding:"14px 0",cursor:"pointer"}}>SAVE</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── SESSION VIEW ─────────────────────────────────────────────────────────────
 
-function SessionView({ day, week, data, onUpdateExercise, onUpdateRun }) {
-  const [numpad, setNumpad]       = useState(null); // {exName} | {type:"km"} 
+function SessionView({ day, week, data, onUpdateExercise, onUpdateRun, onAddWarmup, onEditWarmup, onRemoveWarmup }) {
+  const [numpad, setNumpad]       = useState(null); // {exName} | {type:"km"} | {type:"warmup",idx,field}
+  const [warmupText, setWarmupText] = useState(null); // {idx, field, value} for name editing 
   const [showTimer, setShowTimer] = useState(false);
 
   const prog     = PROGRAM[day];
-  const session  = data[day]?.[week] || { exercises:{}, runKm:null, done:false };
+  const session  = data[day]?.[week] || { exercises:{}, warmup:[], runKm:null, done:false };
   const exData   = session.exercises || {};
+  const warmup   = session.warmup || [];
   const runKm    = session.runKm;
   const isDone   = prog.exercises.every(ex=>exData[ex.name]!==null&&exData[ex.name]!==undefined);
   const runInfo  = prog.run.weeks[week-1];
@@ -388,6 +421,35 @@ function SessionView({ day, week, data, onUpdateExercise, onUpdateRun }) {
         <div style={{marginTop:10,background:"#141414",borderRadius:3,height:3,overflow:"hidden"}}>
           <div style={{width:`${(loggedCount/total)*100}%`,height:"100%",background:"#e8ff6b",transition:"width 0.4s"}}/>
         </div>
+      </div>
+
+      {/* Warmup cardio */}
+      <div style={{marginBottom:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:"#333",letterSpacing:3}}>PRE-STRENGTH CARDIO</div>
+          <button onClick={()=>onAddWarmup(day,week)} style={{background:"none",border:"1px solid #1e1e1e",borderRadius:5,color:"#555",fontFamily:"'JetBrains Mono',monospace",fontSize:13,width:26,height:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>+</button>
+        </div>
+        {warmup.length===0&&(
+          <div onClick={()=>onAddWarmup(day,week)} style={{padding:"10px 14px",background:"#090909",border:"1px dashed #1a1a1a",borderRadius:8,cursor:"pointer",textAlign:"center"}}>
+            <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"#2a2a2a"}}>+ add cardio warmup</span>
+          </div>
+        )}
+        {warmup.map((item,idx)=>(
+          <div key={item.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+            <div style={{flex:1,background:"#0f0f0f",border:"1px solid #1e1e1e",borderRadius:8,padding:"10px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div onClick={()=>setWarmupText({idx,field:"name",value:item.name||""})} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,color:item.name?"#ccc":"#333",cursor:"pointer",minWidth:80}}>
+                {item.name||<span style={{color:"#2a2a2a"}}>exercise</span>}
+              </div>
+              <div onClick={()=>setNumpad({type:"warmup",idx})} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:700,color:item.min?"#6bb8ff":"#2a2a2a",cursor:"pointer"}}>
+                {item.min?`${item.min}m`:"—"}
+              </div>
+            </div>
+            <button onClick={()=>onRemoveWarmup(day,week,idx)} style={{background:"none",border:"none",color:"#2a2a2a",fontFamily:"'JetBrains Mono',monospace",fontSize:16,cursor:"pointer",padding:"0 4px"}}>×</button>
+          </div>
+        ))}
+        {warmup.length>0&&(
+          <button onClick={()=>onAddWarmup(day,week)} style={{width:"100%",background:"none",border:"1px dashed #1a1a1a",borderRadius:8,color:"#2a2a2a",fontFamily:"'JetBrains Mono',monospace",fontSize:11,padding:"7px 0",cursor:"pointer",marginTop:4}}>+ another</button>
+        )}
       </div>
 
       {/* Exercises */}
@@ -500,6 +562,22 @@ function SessionView({ day, week, data, onUpdateExercise, onUpdateRun }) {
           unit="km"
           onConfirm={val=>{ onUpdateRun(day,week,val); setNumpad(null); }}
           onClose={()=>setNumpad(null)}
+        />
+      )}
+      {numpad?.type==="warmup" && (
+        <Numpad
+          value={warmup[numpad.idx]?.min}
+          label="DURATION"
+          unit="min"
+          onConfirm={val=>{ onEditWarmup(day,week,numpad.idx,"min",val); setNumpad(null); }}
+          onClose={()=>setNumpad(null)}
+        />
+      )}
+      {warmupText && (
+        <WarmupNameInput
+          value={warmupText.value}
+          onConfirm={val=>{ onEditWarmup(day,week,warmupText.idx,"name",val); setWarmupText(null); }}
+          onClose={()=>setWarmupText(null)}
         />
       )}
     </div>
@@ -846,9 +924,20 @@ function DashboardView({ data, currentWeek, onLogWeight }) {
               })}
             </>
           ))}
+          {/* Extra days row */}
+          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#555"}}>+</div>
+          {Array.from({length:8},(_,i)=>{
+            const w=i+1;
+            const extras=(data.extraDays||[]).filter(e=>e.week===w);
+            return (
+              <div key={w} style={{height:20,borderRadius:3,background:extras.length>0?"#5a3a8a":"#141414",border:`1px solid ${w===currentWeek?"#e8ff6b44":extras.length>0?"#7a4aaa":"#1e1e1e"}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {extras.length>0&&<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:7,color:"#c8a0ff"}}>{extras.length}</span>}
+              </div>
+            );
+          })}
         </div>
-        <div style={{display:"flex",gap:14,marginTop:12}}>
-          {[["#6abf40","Complete"],["#e8a82a","Partial"],["#141414","Pending"]].map(([c,l])=>(
+        <div style={{display:"flex",gap:14,marginTop:12,flexWrap:"wrap"}}>
+          {[["#6abf40","Complete"],["#e8a82a","Partial"],["#141414","Pending"],["#5a3a8a","Extra day"]].map(([c,l])=>(
             <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
               <div style={{width:7,height:7,borderRadius:2,background:c}}/>
               <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:"#333"}}>{l}</span>
@@ -947,6 +1036,83 @@ function DashboardView({ data, currentWeek, onLogWeight }) {
   );
 }
 
+// ─── EXTRA DAY ───────────────────────────────────────────────────────────────
+
+function ExtraDayModal({ week, onSave, onClose }) {
+  const [note, setNote]     = useState("");
+  const [cardio, setCardio] = useState([{id:Date.now(),name:"",min:""}]);
+  const suggestions = ["Rowing machine","Skip rope","Cycling","Assault bike","Stair climber","Elliptical","Yoga / Mobility","Skateboarding","Swimming","Foam rolling"];
+
+  const addItem = () => setCardio(c=>[...c,{id:Date.now()+c.length,name:"",min:""}]);
+  const removeItem = (id) => setCardio(c=>c.filter(i=>i.id!==id));
+  const updateItem = (id,field,val) => setCardio(c=>c.map(i=>i.id===id?{...i,[field]:val}:i));
+
+  const save = () => {
+    const items = cardio.filter(i=>i.name||i.min);
+    onSave({ id:Date.now(), date:today(), week, note, cardio:items });
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",zIndex:300,backdropFilter:"blur(6px)"}} onClick={onClose}>
+      <div style={{width:"100%",maxWidth:480,background:"#0d0d0d",borderTop:"1px solid #2a2a2a",padding:"20px 16px 40px",borderRadius:"16px 16px 0 0",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#555",letterSpacing:3,textAlign:"center",marginBottom:16}}>EXTRA DAY — WEEK {week}</div>
+
+        {/* Cardio items */}
+        <div style={{marginBottom:16}}>
+          {cardio.map((item,idx)=>(
+            <div key={item.id} style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
+              <div style={{flex:1,background:"#111",border:"1px solid #1e1e1e",borderRadius:8,padding:"10px 12px"}}>
+                <input
+                  value={item.name}
+                  onChange={e=>updateItem(item.id,"name",e.target.value)}
+                  placeholder="exercise name"
+                  style={{width:"100%",background:"none",border:"none",color:"#e0e0e0",fontFamily:"'JetBrains Mono',monospace",fontSize:13,outline:"none",marginBottom:4}}
+                />
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <input
+                    value={item.min}
+                    onChange={e=>updateItem(item.id,"min",e.target.value.replace(/[^0-9]/g,""))}
+                    placeholder="min"
+                    inputMode="numeric"
+                    style={{width:60,background:"none",border:"none",borderBottom:"1px solid #2a2a2a",color:"#6bb8ff",fontFamily:"'JetBrains Mono',monospace",fontSize:13,outline:"none",padding:"2px 0"}}
+                  />
+                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#333"}}>minutes</span>
+                </div>
+              </div>
+              {cardio.length>1&&<button onClick={()=>removeItem(item.id)} style={{background:"none",border:"none",color:"#333",fontSize:18,cursor:"pointer"}}>×</button>}
+            </div>
+          ))}
+          <button onClick={addItem} style={{width:"100%",background:"none",border:"1px dashed #1a1a1a",borderRadius:8,color:"#2a2a2a",fontFamily:"'JetBrains Mono',monospace",fontSize:11,padding:"8px 0",cursor:"pointer"}}>+ add another</button>
+        </div>
+
+        {/* Suggestions */}
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>
+          {suggestions.map(s=>(
+            <button key={s} onClick={()=>{
+              const empty=cardio.find(i=>!i.name);
+              if(empty) updateItem(empty.id,"name",s);
+              else setCardio(c=>[...c,{id:Date.now(),name:s,min:""}]);
+            }} style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:20,color:"#555",fontFamily:"'JetBrains Mono',monospace",fontSize:10,padding:"5px 10px",cursor:"pointer"}}>{s}</button>
+          ))}
+        </div>
+
+        {/* Note */}
+        <input
+          value={note}
+          onChange={e=>setNote(e.target.value)}
+          placeholder="notes (optional)"
+          style={{width:"100%",background:"#111",border:"1px solid #1e1e1e",borderRadius:8,color:"#888",fontFamily:"'JetBrains Mono',monospace",fontSize:12,padding:"10px 12px",outline:"none",boxSizing:"border-box",marginBottom:14}}
+        />
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <button onClick={onClose} style={{background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",fontSize:14,padding:"14px 0",cursor:"pointer"}}>CANCEL</button>
+          <button onClick={save} style={{background:"#e8ff6b",border:"none",borderRadius:8,color:"#0d0d0d",fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700,padding:"14px 0",cursor:"pointer"}}>SAVE DAY</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── DAY TABS WITH STATUS ─────────────────────────────────────────────────────
 
 function getDayStatus(data, day, week) {
@@ -969,6 +1135,7 @@ export default function App() {
   const [activeWeek, setActiveWeek] = useState(1);
   const [view, setView]           = useState("session");
   const [weekOpen, setWeekOpen]   = useState(false);
+  const [showExtraDay, setShowExtraDay] = useState(false);
 
   // Load from IndexedDB on mount (with localStorage fallback)
   useEffect(() => {
@@ -1007,11 +1174,31 @@ export default function App() {
 
   const handleLogWeight = (kg) => mutate(d=>{
     if(!d.bodyWeight) d.bodyWeight=[];
-    // Update today's entry if exists, else push
     const t=today();
     const idx=d.bodyWeight.findIndex(e=>e.date===t);
     if(idx>=0) d.bodyWeight[idx].kg=kg;
     else d.bodyWeight.push({date:t,kg});
+  });
+
+  const handleAddWarmup = (day,week) => mutate(d=>{
+    if(!d[day][week].warmup) d[day][week].warmup=[];
+    d[day][week].warmup.push({id:Date.now(),name:"",min:null});
+  });
+
+  const handleEditWarmup = (day,week,idx,field,val) => mutate(d=>{
+    if(!d[day][week].warmup) return;
+    d[day][week].warmup[idx][field]=val;
+  });
+
+  const handleRemoveWarmup = (day,week,idx) => mutate(d=>{
+    if(!d[day][week].warmup) return;
+    d[day][week].warmup.splice(idx,1);
+  });
+
+  const handleSaveExtraDay = (entry) => mutate(d=>{
+    if(!d.extraDays) d.extraDays=[];
+    d.extraDays.push(entry);
+    setShowExtraDay(false);
   });
 
   if (!loaded) return (
@@ -1075,6 +1262,9 @@ export default function App() {
               day={activeDay} week={activeWeek} data={data}
               onUpdateExercise={handleUpdateExercise}
               onUpdateRun={handleUpdateRun}
+              onAddWarmup={handleAddWarmup}
+              onEditWarmup={handleEditWarmup}
+              onRemoveWarmup={handleRemoveWarmup}
             />
           :<DashboardView
               data={data} currentWeek={activeWeek}
