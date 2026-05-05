@@ -787,54 +787,82 @@ function importJSON(file, onSuccess, onError) {
 
 // ─── RADAR CHART ─────────────────────────────────────────────────────────────
 
-function RadarChart({ weeklyData, exercises, currentWeek }) {
+function RadarChart({ data, currentWeek }) {
   const [tooltip, setTooltip] = useState(null);
   const W = 300, H = 300, cx = 150, cy = 150;
-  const BASE_R = 60;  // radius of the week-1 baseline circle
-  const MAX_R  = 112; // max radius an axis can reach
+  const BASE_R = 55;
+  const MAX_R  = 108;
 
   const WEEK_COLORS = ["#6bb8ff","#a78bfa","#34d399","#fb923c","#f472b6","#facc15","#e8ff6b"];
 
-  const n = exercises.length;
+  // Collect all unique exercises across all days
+  const allExercises = [];
+  for (const day of ["A","B","C"]) {
+    for (const ex of PROGRAM[day].exercises) {
+      if (!allExercises.find(e => e.name === ex.name)) {
+        allExercises.push({
+          name: ex.name,
+          label: ex.name
+            .replace("Dumbbell ","DB ").replace("Seated ","")
+            .replace("Rope Triceps ","Tri ").replace("Pushdown","Push")
+            .replace("Pulldown","Pull").replace("Hanging ","")
+            .replace(" Raises","R").replace("Cable ","")
+            .replace("Bicep Curl","Curl").replace(" Press","P")
+            .replace("Shoulder","Sh").slice(0,11)
+        });
+      }
+    }
+  }
+
+  const n = allExercises.length;
   const angle = (i) => (Math.PI * 2 * i / n) - Math.PI / 2;
 
-  // Get week 1 values as baseline
-  const baseWeek = weeklyData.find(w => w.week === 1) || weeklyData[0];
-  const filledWeeks = weeklyData.filter(w =>
-    Object.values(w.values).some(v => v != null)
-  );
+  // For each week, get the max weight across all days for each exercise
+  const weeklyData = Array.from({length:8}, (_, wi) => {
+    const w = wi + 1;
+    const values = {};
+    for (const ex of allExercises) {
+      let max = null;
+      for (const day of ["A","B","C"]) {
+        const v = data[day]?.[w]?.exercises?.[ex.name];
+        if (v != null) max = max == null ? v : Math.max(max, v);
+      }
+      values[ex.name] = max;
+    }
+    const hasAny = Object.values(values).some(v => v != null);
+    return hasAny ? { week: w, values } : null;
+  }).filter(Boolean);
 
-  // For each axis: radius = BASE_R + extra based on how much MORE than week1
+  const baseWeek = weeklyData[0];
+  const filledWeeks = weeklyData;
+
   const getRadius = (exName, val) => {
     if (val == null) return BASE_R;
     const baseVal = baseWeek?.values[exName];
     if (!baseVal || baseVal === 0) return BASE_R;
-    // How much above baseline? Cap at 2x for visual clarity
-    const ratio = val / baseVal; // 1.0 = same as week 1 = BASE_R
-    const extra = Math.max(0, ratio - 1) * (MAX_R - BASE_R) * 1.2;
+    const ratio = val / baseVal;
+    const extra = Math.max(0, ratio - 1) * (MAX_R - BASE_R) * 1.4;
     return Math.min(MAX_R, BASE_R + extra);
   };
 
   const weekPoints = (values) =>
-    exercises.map((ex, i) => {
+    allExercises.map((ex, i) => {
       const r = getRadius(ex.name, values[ex.name]);
       return { x: cx + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)), r };
     });
 
-  // Smooth closed bezier blob through points
   const blobPath = (pts) => {
     if (pts.length < 2) return "";
     const n = pts.length;
-    // Control points: use adjacent points to create smooth curves
     const cp = pts.map((p, i) => {
       const prev = pts[(i - 1 + n) % n];
       const next = pts[(i + 1) % n];
-      const tension = 0.35;
+      const t = 0.3;
       return {
-        cp1x: p.x - (next.x - prev.x) * tension,
-        cp1y: p.y - (next.y - prev.y) * tension,
-        cp2x: p.x + (next.x - prev.x) * tension,
-        cp2y: p.y + (next.y - prev.y) * tension,
+        cp1x: p.x - (next.x - prev.x) * t,
+        cp1y: p.y - (next.y - prev.y) * t,
+        cp2x: p.x + (next.x - prev.x) * t,
+        cp2y: p.y + (next.y - prev.y) * t,
       };
     });
     let d = `M ${pts[0].x.toFixed(2)},${pts[0].y.toFixed(2)}`;
@@ -843,12 +871,6 @@ function RadarChart({ weeklyData, exercises, currentWeek }) {
       d += ` C ${cp[i].cp2x.toFixed(2)},${cp[i].cp2y.toFixed(2)} ${cp[(i+1)%n].cp1x.toFixed(2)},${cp[(i+1)%n].cp1y.toFixed(2)} ${next.x.toFixed(2)},${next.y.toFixed(2)}`;
     }
     return d + " Z";
-  };
-
-  // Perfect circle path at BASE_R
-  const circlePath = () => {
-    const r = BASE_R;
-    return `M ${cx+r},${cy} A ${r},${r} 0 1 1 ${cx+r-0.001},${cy} Z`;
   };
 
   const latestWeek = filledWeeks[filledWeeks.length - 1];
@@ -862,14 +884,14 @@ function RadarChart({ weeklyData, exercises, currentWeek }) {
         <defs>
           {WEEK_COLORS.map((c, i) => (
             <radialGradient key={i} id={`rg${i}`} cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor={c} stopOpacity="0.25"/>
-              <stop offset="100%" stopColor={c} stopOpacity="0.05"/>
+              <stop offset="0%" stopColor={c} stopOpacity="0.3"/>
+              <stop offset="100%" stopColor={c} stopOpacity="0.04"/>
             </radialGradient>
           ))}
         </defs>
 
-        {/* Axes */}
-        {exercises.map((ex, i) => {
+        {/* Axes + labels */}
+        {allExercises.map((ex, i) => {
           const lp = { x: cx + (MAX_R+22)*Math.cos(angle(i)), y: cy + (MAX_R+22)*Math.sin(angle(i)) };
           const ap = { x: cx + MAX_R*Math.cos(angle(i)), y: cy + MAX_R*Math.sin(angle(i)) };
           const ang = angle(i);
@@ -877,7 +899,7 @@ function RadarChart({ weeklyData, exercises, currentWeek }) {
           return (
             <g key={i}>
               <line x1={cx} y1={cy} x2={ap.x.toFixed(1)} y2={ap.y.toFixed(1)} stroke="#1e1e1e" strokeWidth={1}/>
-              <text x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fill="#555" fontSize={9}
+              <text x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fill="#555" fontSize={8.5}
                 textAnchor={anchor} dominantBaseline="middle" fontFamily="monospace"
                 style={{ pointerEvents:"none" }}>
                 {ex.label}
@@ -886,27 +908,24 @@ function RadarChart({ weeklyData, exercises, currentWeek }) {
           );
         })}
 
-        {/* Baseline circle — always a perfect circle at BASE_R */}
+        {/* Baseline circle */}
         <circle cx={cx} cy={cy} r={BASE_R}
           fill="none" stroke="#2a2a2a" strokeWidth={1.5} strokeDasharray="3 3"/>
-
-        {/* Outer ring reference */}
         <circle cx={cx} cy={cy} r={MAX_R} fill="none" stroke="#141414" strokeWidth={1}/>
 
-        {/* Week blobs — oldest to newest */}
+        {/* Week blobs — oldest first, newest on top */}
         {filledWeeks.map((wd, wi) => {
           const isLatest = wi === filledWeeks.length - 1;
-          const isBase   = wd.week === (baseWeek?.week);
-          // Skip baseline week as separate blob — it IS the circle
-          if (isBase && filledWeeks.length > 1) return null;
+          const isBase   = wi === 0 && filledWeeks.length > 1;
+          if (isBase) return null; // baseline shown as the dashed circle
           const colorIdx = (wd.week - 1) % WEEK_COLORS.length;
           const color = WEEK_COLORS[colorIdx];
-          const opacity = isLatest ? 1 : Math.max(0.15, 0.6 - (filledWeeks.length - 1 - wi) * 0.15);
+          const age = filledWeeks.length - 1 - wi;
+          const opacity = isLatest ? 1 : Math.max(0.12, 0.55 - age * 0.12);
           const pts = weekPoints(wd.values);
-          const path = isBase ? circlePath() : blobPath(pts);
           return (
             <g key={wd.week}>
-              <path d={path}
+              <path d={blobPath(pts)}
                 fill={`url(#rg${colorIdx})`} fillOpacity={opacity}
                 stroke={color} strokeOpacity={opacity}
                 strokeWidth={isLatest ? 2.5 : 1.5}
@@ -917,32 +936,30 @@ function RadarChart({ weeklyData, exercises, currentWeek }) {
         })}
 
         {/* Tap targets on latest week */}
-        {latestWeek && (() => {
-          const pts = weekPoints(latestWeek.values);
-          return exercises.map((ex, i) => (
-            <circle key={i} cx={pts[i].x.toFixed(1)} cy={pts[i].y.toFixed(1)} r={14}
-              fill="transparent"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                setTooltip({ x:pts[i].x, y:pts[i].y, week:latestWeek.week, ex:ex.name, val:latestWeek.values[ex.name] });
-              }}
-              style={{ cursor:"pointer", touchAction:"none" }}
-            />
-          ));
-        })()}
+        {latestWeek && weekPoints(latestWeek.values).map((p, i) => (
+          <circle key={i} cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r={14}
+            fill="transparent"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              const ex = allExercises[i];
+              setTooltip({ x:p.x, y:p.y, week:latestWeek.week, ex:ex.name, val:latestWeek.values[ex.name] });
+            }}
+            style={{ cursor:"pointer", touchAction:"none" }}
+          />
+        ))}
 
         {/* Tooltip */}
         {tooltip && (() => {
-          const tx = tooltip.x > cx ? Math.min(W-90, tooltip.x) : Math.max(4, tooltip.x-86);
-          const ty = Math.min(H-38, Math.max(4, tooltip.y-18));
-          const display = tooltip.val===0?"BW":tooltip.val!=null?`${tooltip.val}kg`:"—";
+          const tx = tooltip.x > cx ? Math.min(W-92, tooltip.x) : Math.max(4, tooltip.x-88);
+          const ty = Math.min(H-40, Math.max(4, tooltip.y-18));
+          const display = tooltip.val===0 ? "BW" : tooltip.val!=null ? `${tooltip.val}kg` : "—";
           const base = baseWeek?.values[tooltip.ex];
           const delta = (tooltip.val && base && tooltip.val !== base)
-            ? ` (${tooltip.val > base ? "+" : ""}${(tooltip.val - base).toFixed(1)})`  : "";
-          const exShort = tooltip.ex.replace("Dumbbell ","DB ").replace("Seated ","").replace("Rope ","").replace("Hanging ","").slice(0,16);
+            ? ` (${tooltip.val > base?"+":""}${(tooltip.val-base).toFixed(1)})` : "";
+          const exShort = tooltip.ex.replace("Dumbbell ","DB ").replace("Seated ","").replace("Rope ","").replace("Hanging ","").slice(0,18);
           return (
             <g style={{ pointerEvents:"none" }}>
-              <rect x={tx} y={ty} width={88} height={32} rx={6} fill="#0d0d0d" stroke="#e8ff6b" strokeWidth={1.2}/>
+              <rect x={tx} y={ty} width={90} height={32} rx={6} fill="#0d0d0d" stroke="#e8ff6b" strokeWidth={1.2}/>
               <text x={tx+6} y={ty+10} fill="#666" fontSize={7.5} fontFamily="monospace" dominantBaseline="hanging">{exShort}</text>
               <text x={tx+6} y={ty+20} fill="#e8ff6b" fontSize={9} fontFamily="monospace" dominantBaseline="hanging" fontWeight="bold">{display}{delta}</text>
             </g>
@@ -953,10 +970,10 @@ function RadarChart({ weeklyData, exercises, currentWeek }) {
       {/* Legend */}
       <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap", marginTop:6 }}>
         <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-          <div style={{ width:16, height:0, border:"1.5px dashed #2a2a2a", borderRadius:1 }}/>
-          <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333" }}>baseline</span>
+          <div style={{ width:16, height:0, border:"1.5px dashed #2a2a2a" }}/>
+          <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333" }}>W1 baseline</span>
         </div>
-        {filledWeeks.filter(w => w.week !== baseWeek?.week || filledWeeks.length===1).map((w, i) => {
+        {filledWeeks.slice(1).map((w) => {
           const color = WEEK_COLORS[(w.week-1) % WEEK_COLORS.length];
           const isLatest = w.week === latestWeek?.week;
           return (
@@ -1095,7 +1112,6 @@ function CardioLine({ sessions }) {
 
 function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
   const [showWeightPad, setShowWeightPad] = useState(false);
-  const [activeDay, setActiveDay]         = useState("A");
 
   const bwEntries = data.bodyWeight || [];
   const latestBW  = bwEntries.length > 0 ? bwEntries[bwEntries.length - 1] : null;
@@ -1108,35 +1124,8 @@ function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
     days: ["A","B","C"].map(d => getDayStatus(data, d, i + 1))
   }));
 
-  // ── Radar data ──
-  // For selected day, build weeklyData
-  const radarExercises = PROGRAM[activeDay].exercises.map(ex => ({
-    name: ex.name,
-    label: ex.name
-      .replace('Dumbbell ','DB ')
-      .replace('Seated DB ','')
-      .replace(' Press','P')
-      .replace('Pulldown','Pull')
-      .replace('Triceps ','Tri ')
-      .replace('Pushdown','Push')
-      .replace('Hanging ','')
-      .replace(' Raises','R')
-      .replace('Cable ','')
-      .replace('Bicep Curl','Curl')
-      .replace('Shoulder','Sh.')
-      .slice(0, 10)
-  }));
 
-  const radarWeeklyData = Array.from({ length: 8 }, (_, i) => {
-    const w = i + 1;
-    const values = {};
-    PROGRAM[activeDay].exercises.forEach(ex => {
-      values[ex.name] = data[activeDay]?.[w]?.exercises?.[ex.name] ?? null;
-    });
-    return { week: w, values };
-  }).filter(wd => Object.values(wd.values).some(v => v != null));
-
-  // ── Cardio line sessions ──
+    // ── Cardio line sessions ──
   const cardioSessions = [];
   for (const day of ["A","B","C"]) {
     for (let w = 1; w <= 8; w++) {
@@ -1247,24 +1236,9 @@ function DashboardView({ data, currentWeek, onLogWeight, onImport }) {
       </Card>
 
       {/* ── STRENGTH RADAR ── */}
-      <Card title="STRENGTH" right={
-        <div style={{ display:"flex", gap:4 }}>
-          {["A","B","C"].map(d => (
-            <button key={d} onClick={()=>setActiveDay(d)} style={{
-              background: activeDay===d ? "#e8ff6b" : "#111",
-              border: `1px solid ${activeDay===d ? "#e8ff6b" : "#1e1e1e"}`,
-              borderRadius: 5, color: activeDay===d ? "#060606" : "#555",
-              fontFamily:"'JetBrains Mono',monospace", fontSize:10,
-              padding:"3px 10px", cursor:"pointer", fontWeight: activeDay===d?700:400
-            }}>{d}</button>
-          ))}
-        </div>
-      }>
-        {radarWeeklyData.length === 0
-          ? <div style={{ textAlign:"center", padding:"32px 0", fontFamily:"'JetBrains Mono',monospace", fontSize:10, color:"#222" }}>log a session to see your shape</div>
-          : <RadarChart weeklyData={radarWeeklyData} exercises={radarExercises} currentWeek={currentWeek}/>
-        }
-        <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333", textAlign:"center", marginTop:8 }}>hold any point to inspect · each ring = one week</div>
+      <Card title="STRENGTH">
+        <RadarChart data={data} currentWeek={currentWeek}/>
+        <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333", textAlign:"center", marginTop:8 }}>tap any point to inspect · each blob = one week</div>
       </Card>
 
       {/* ── CARDIO LINE ── */}
