@@ -196,8 +196,12 @@ function Numpad({ value, label, unit="kg", onConfirm, onClose }) {
       <div style={{width:"100%",maxWidth:400,background:"#0d0d0d",borderTop:"1px solid #2a2a2a",padding:"16px 16px 36px",borderRadius:"16px 16px 0 0"}} onClick={e=>e.stopPropagation()}>
         {label && <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#555",letterSpacing:3,textAlign:"center",marginBottom:8}}>{label}</div>}
         <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:42,color:"#e8ff6b",textAlign:"center",letterSpacing:2,marginBottom:16,minHeight:54,borderBottom:"1px solid #1e1e1e",paddingBottom:12}}>
-          {val===""?<span style={{opacity:0.2}}>0</span>:val}
-          {val!==""&&<span style={{fontSize:18,color:"#555",marginLeft:6}}>{unit}</span>}
+          {val===""
+            ? (value!==null&&value!==undefined
+                ? <span style={{opacity:0.25,color:"#e8ff6b"}}>{value===0?"BW":value}{value!==0&&<span style={{fontSize:18,color:"#555",marginLeft:4}}>{unit}</span>}</span>
+                : <span style={{opacity:0.2}}>—</span>)
+            : <>{val}<span style={{fontSize:18,color:"#555",marginLeft:6}}>{unit}</span></>
+          }
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
           {keys.map(k=>(
@@ -790,26 +794,18 @@ function importJSON(file, onSuccess, onError) {
 function RadarChart({ data, currentWeek }) {
   const [tooltip, setTooltip] = useState(null);
   const W = 300, H = 300, cx = 150, cy = 150;
-  const BASE_R = 55;
-  const MAX_R  = 108;
-
+  const BASE_R = 55, MAX_R = 108;
   const WEEK_COLORS = ["#6bb8ff","#a78bfa","#34d399","#fb923c","#f472b6","#facc15","#e8ff6b"];
 
-  // Collect all unique exercises across all days
   const allExercises = [];
   for (const day of ["A","B","C"]) {
     for (const ex of PROGRAM[day].exercises) {
       if (!allExercises.find(e => e.name === ex.name)) {
-        allExercises.push({
-          name: ex.name,
-          label: ex.name
-            .replace("Dumbbell ","DB ").replace("Seated ","")
-            .replace("Rope Triceps ","Tri ").replace("Pushdown","Push")
-            .replace("Pulldown","Pull").replace("Hanging ","")
-            .replace(" Raises","R").replace("Cable ","")
-            .replace("Bicep Curl","Curl").replace(" Press","P")
-            .replace("Shoulder","Sh").slice(0,11)
-        });
+        allExercises.push({ name: ex.name, label: ex.name
+          .replace("Dumbbell ","DB ").replace("Seated ","").replace("Rope Triceps ","Tri ")
+          .replace("Pushdown","Push").replace("Pulldown","Pull").replace("Hanging ","")
+          .replace(" Raises","R").replace("Cable ","").replace("Bicep Curl","Curl")
+          .replace(" Press","P").replace("Shoulder","Sh").slice(0,11) });
       }
     }
   }
@@ -817,7 +813,6 @@ function RadarChart({ data, currentWeek }) {
   const n = allExercises.length;
   const angle = (i) => (Math.PI * 2 * i / n) - Math.PI / 2;
 
-  // For each week, get the max weight across all days for each exercise
   const weeklyData = Array.from({length:8}, (_, wi) => {
     const w = wi + 1;
     const values = {};
@@ -829,133 +824,100 @@ function RadarChart({ data, currentWeek }) {
       }
       values[ex.name] = max;
     }
-    const hasAny = Object.values(values).some(v => v != null);
-    return hasAny ? { week: w, values } : null;
+    return Object.values(values).some(v => v != null) ? { week: w, values } : null;
   }).filter(Boolean);
 
-  const baseWeek = weeklyData[0];
-  const filledWeeks = weeklyData;
+  const baseWeek   = weeklyData[0];
+  const latestWeek = weeklyData[weeklyData.length - 1];
 
   const getRadius = (exName, val) => {
     if (val == null) return BASE_R;
-    const baseVal = baseWeek?.values[exName];
-    if (!baseVal || baseVal === 0) return BASE_R;
-    const ratio = val / baseVal;
-    const extra = Math.max(0, ratio - 1) * (MAX_R - BASE_R) * 1.4;
-    return Math.min(MAX_R, BASE_R + extra);
+    const b = baseWeek?.values[exName];
+    if (!b || b === 0) return BASE_R;
+    return Math.min(MAX_R, BASE_R + Math.max(0, val/b - 1) * (MAX_R - BASE_R) * 1.4);
   };
 
-  const weekPoints = (values) =>
-    allExercises.map((ex, i) => {
-      const r = getRadius(ex.name, values[ex.name]);
-      return { x: cx + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)), r };
-    });
+  const weekPoints = (values) => allExercises.map((ex, i) => {
+    const r = getRadius(ex.name, values[ex.name]);
+    return { x: cx + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)) };
+  });
 
   const blobPath = (pts) => {
-    if (pts.length < 2) return "";
-    const n = pts.length;
+    const m = pts.length; if (m < 2) return "";
     const cp = pts.map((p, i) => {
-      const prev = pts[(i - 1 + n) % n];
-      const next = pts[(i + 1) % n];
-      const t = 0.3;
-      return {
-        cp1x: p.x - (next.x - prev.x) * t,
-        cp1y: p.y - (next.y - prev.y) * t,
-        cp2x: p.x + (next.x - prev.x) * t,
-        cp2y: p.y + (next.y - prev.y) * t,
-      };
+      const prev = pts[(i-1+m)%m], next = pts[(i+1)%m], t = 0.3;
+      return { cp1x:p.x-(next.x-prev.x)*t, cp1y:p.y-(next.y-prev.y)*t, cp2x:p.x+(next.x-prev.x)*t, cp2y:p.y+(next.y-prev.y)*t };
     });
     let d = `M ${pts[0].x.toFixed(2)},${pts[0].y.toFixed(2)}`;
-    for (let i = 0; i < n; i++) {
-      const next = pts[(i + 1) % n];
-      d += ` C ${cp[i].cp2x.toFixed(2)},${cp[i].cp2y.toFixed(2)} ${cp[(i+1)%n].cp1x.toFixed(2)},${cp[(i+1)%n].cp1y.toFixed(2)} ${next.x.toFixed(2)},${next.y.toFixed(2)}`;
+    for (let i = 0; i < m; i++) {
+      const nx = pts[(i+1)%m];
+      d += ` C ${cp[i].cp2x.toFixed(2)},${cp[i].cp2y.toFixed(2)} ${cp[(i+1)%m].cp1x.toFixed(2)},${cp[(i+1)%m].cp1y.toFixed(2)} ${nx.x.toFixed(2)},${nx.y.toFixed(2)}`;
     }
     return d + " Z";
   };
 
-  const latestWeek = filledWeeks[filledWeeks.length - 1];
-
   return (
     <div style={{ position:"relative", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}>
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`}
-        style={{ display:"block", touchAction:"none" }}
-        onPointerLeave={() => setTooltip(null)}
-      >
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display:"block", touchAction:"none" }} onPointerLeave={() => setTooltip(null)}>
         <defs>
           {WEEK_COLORS.map((c, i) => (
             <radialGradient key={i} id={`rg${i}`} cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor={c} stopOpacity="0.3"/>
+              <stop offset="0%" stopColor={c} stopOpacity="0.35"/>
               <stop offset="100%" stopColor={c} stopOpacity="0.04"/>
             </radialGradient>
           ))}
         </defs>
 
-        {/* Axes + labels */}
+        {/* Axes */}
         {allExercises.map((ex, i) => {
-          const lp = { x: cx + (MAX_R+22)*Math.cos(angle(i)), y: cy + (MAX_R+22)*Math.sin(angle(i)) };
-          const ap = { x: cx + MAX_R*Math.cos(angle(i)), y: cy + MAX_R*Math.sin(angle(i)) };
-          const ang = angle(i);
-          const anchor = Math.abs(Math.cos(ang)) < 0.25 ? "middle" : Math.cos(ang) > 0 ? "start" : "end";
+          const lp = { x: cx+(MAX_R+22)*Math.cos(angle(i)), y: cy+(MAX_R+22)*Math.sin(angle(i)) };
+          const ap = { x: cx+MAX_R*Math.cos(angle(i)), y: cy+MAX_R*Math.sin(angle(i)) };
+          const anchor = Math.abs(Math.cos(angle(i))) < 0.25 ? "middle" : Math.cos(angle(i)) > 0 ? "start" : "end";
           return (
             <g key={i}>
               <line x1={cx} y1={cy} x2={ap.x.toFixed(1)} y2={ap.y.toFixed(1)} stroke="#1e1e1e" strokeWidth={1}/>
-              <text x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fill="#555" fontSize={8.5}
-                textAnchor={anchor} dominantBaseline="middle" fontFamily="monospace"
-                style={{ pointerEvents:"none" }}>
-                {ex.label}
-              </text>
+              <text x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fill="#555" fontSize={8.5} textAnchor={anchor} dominantBaseline="middle" fontFamily="monospace" style={{ pointerEvents:"none" }}>{ex.label}</text>
             </g>
           );
         })}
 
-        {/* Baseline circle */}
-        <circle cx={cx} cy={cy} r={BASE_R}
-          fill="none" stroke="#2a2a2a" strokeWidth={1.5} strokeDasharray="3 3"/>
         <circle cx={cx} cy={cy} r={MAX_R} fill="none" stroke="#141414" strokeWidth={1}/>
+        <circle cx={cx} cy={cy} r={BASE_R} fill="none" stroke="#2a2a2a" strokeWidth={1.5} strokeDasharray="3 3"/>
 
-        {/* Week blobs — oldest first, newest on top */}
-        {filledWeeks.map((wd, wi) => {
-          const isLatest = wi === filledWeeks.length - 1;
-          const isBase   = wi === 0 && filledWeeks.length > 1;
-          if (isBase) return null; // baseline shown as the dashed circle
-          const colorIdx = (wd.week - 1) % WEEK_COLORS.length;
-          const color = WEEK_COLORS[colorIdx];
-          const age = filledWeeks.length - 1 - wi;
-          const opacity = isLatest ? 1 : Math.max(0.12, 0.55 - age * 0.12);
-          const pts = weekPoints(wd.values);
+        {/* Past weeks — dotted coloured outlines only, no fill */}
+        {weeklyData.slice(1, -1).map((wd) => {
+          const color = WEEK_COLORS[(wd.week-1) % WEEK_COLORS.length];
           return (
-            <g key={wd.week}>
-              <path d={blobPath(pts)}
-                fill={`url(#rg${colorIdx})`} fillOpacity={opacity}
-                stroke={color} strokeOpacity={opacity}
-                strokeWidth={isLatest ? 2.5 : 1.5}
-                style={{ pointerEvents:"none" }}
-              />
-            </g>
+            <path key={wd.week} d={blobPath(weekPoints(wd.values))}
+              fill="none" stroke={color} strokeOpacity={0.5} strokeWidth={1.5} strokeDasharray="4 3"
+              style={{ pointerEvents:"none" }}/>
           );
         })}
 
-        {/* Tap targets on latest week */}
-        {latestWeek && weekPoints(latestWeek.values).map((p, i) => (
-          <circle key={i} cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r={14}
-            fill="transparent"
-            onPointerDown={(e) => {
-              e.preventDefault();
-              const ex = allExercises[i];
-              setTooltip({ x:p.x, y:p.y, week:latestWeek.week, ex:ex.name, val:latestWeek.values[ex.name] });
-            }}
-            style={{ cursor:"pointer", touchAction:"none" }}
-          />
-        ))}
+        {/* Latest week — solid filled blob */}
+        {latestWeek && (() => {
+          const ci = (latestWeek.week-1) % WEEK_COLORS.length;
+          const color = WEEK_COLORS[ci];
+          const pts = weekPoints(latestWeek.values);
+          return (
+            <g>
+              <path d={blobPath(pts)} fill={`url(#rg${ci})`} stroke={color} strokeWidth={2.5} style={{ pointerEvents:"none" }}/>
+              {pts.map((p, i) => (
+                <circle key={i} cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r={14} fill="transparent"
+                  onPointerDown={(e) => { e.preventDefault(); const ex=allExercises[i]; setTooltip({ x:p.x, y:p.y, week:latestWeek.week, ex:ex.name, val:latestWeek.values[ex.name] }); }}
+                  style={{ cursor:"pointer", touchAction:"none" }}/>
+              ))}
+            </g>
+          );
+        })()}
 
         {/* Tooltip */}
         {tooltip && (() => {
           const tx = tooltip.x > cx ? Math.min(W-92, tooltip.x) : Math.max(4, tooltip.x-88);
           const ty = Math.min(H-40, Math.max(4, tooltip.y-18));
-          const display = tooltip.val===0 ? "BW" : tooltip.val!=null ? `${tooltip.val}kg` : "—";
+          const display = tooltip.val===0?"BW":tooltip.val!=null?`${tooltip.val}kg`:"—";
           const base = baseWeek?.values[tooltip.ex];
-          const delta = (tooltip.val && base && tooltip.val !== base)
-            ? ` (${tooltip.val > base?"+":""}${(tooltip.val-base).toFixed(1)})` : "";
+          const delta = (tooltip.val && base && tooltip.val!==base) ? ` (${tooltip.val>base?"+":""}${(tooltip.val-base).toFixed(1)})` : "";
           const exShort = tooltip.ex.replace("Dumbbell ","DB ").replace("Seated ","").replace("Rope ","").replace("Hanging ","").slice(0,18);
           return (
             <g style={{ pointerEvents:"none" }}>
@@ -967,18 +929,19 @@ function RadarChart({ data, currentWeek }) {
         })()}
       </svg>
 
-      {/* Legend */}
       <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap", marginTop:6 }}>
         <div style={{ display:"flex", alignItems:"center", gap:4 }}>
           <div style={{ width:16, height:0, border:"1.5px dashed #2a2a2a" }}/>
-          <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333" }}>W1 baseline</span>
+          <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:"#333" }}>W1 base</span>
         </div>
-        {filledWeeks.slice(1).map((w) => {
+        {weeklyData.slice(1).map((w) => {
           const color = WEEK_COLORS[(w.week-1) % WEEK_COLORS.length];
           const isLatest = w.week === latestWeek?.week;
           return (
             <div key={w.week} style={{ display:"flex", alignItems:"center", gap:4 }}>
-              <div style={{ width:16, height:2.5, background:color, borderRadius:2, opacity:isLatest?1:0.5 }}/>
+              {isLatest
+                ? <div style={{ width:16, height:2.5, background:color, borderRadius:2 }}/>
+                : <svg width={16} height={6}><line x1={0} y1={3} x2={16} y2={3} stroke={color} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.6}/></svg>}
               <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:8, color:isLatest?color:"#444" }}>W{w.week}</span>
             </div>
           );
